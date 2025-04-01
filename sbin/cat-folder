@@ -3,7 +3,7 @@
 # Script to cat all files in a folder and subfolders with LLM-friendly output format
 
 usage() {
-    echo "Usage: $0 [options] [directory]"
+    echo "Usage: $(basename "$0") [options] [directory]"
     echo "Options:"
     echo "  -i EXTENSIONS   Include only files with specified extensions (comma-separated, e.g., \"txt,md,sh\")"
     echo "  -e EXTENSIONS   Exclude files with specified extensions (comma-separated, e.g., \"log,tmp,bak\")"
