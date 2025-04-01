@@ -76,7 +76,8 @@ select_profile_file() {
 # if curl execution, ask user to clone repo to current folder
 clone_repo() {
     if [ -d "$REPO_NAME" ]; then
-        echo "Directory $REPO_NAME already exists. Exiting without cloning."
+        echo "Directory $REPO_NAME already exists. To use execute:"
+        echo "./${REPO_NAME}/init.sh"
         exit 1
     fi
     #prompt user to clone
