@@ -38,11 +38,12 @@ add_to_profile() {
         exit 1
     fi
 
-    # Check if already added to profile
+    #echo "Check if already added to profile"
     if [ -f "$profile_file" ]; then
         if grep -q "# Added by ${REPO_NAME} init.sh script on" "$profile_file"; then
-            # Sed to update the source line
-            sed -i.bak 's|^\s*\(source\|\.\)\s\+.*shell-scripts/init\.sh.*|source "'"${SCRIPT_DIR}/init.sh"'/init.sh"|g' "$profile_file"
+            #echo "Sed find line that starts with source and ends with shell-scripts/init.sh"          
+            sed -i -e 's|^# Added by '"${REPO_NAME}"' init.sh script on.*|# Added by '"${REPO_NAME}"' init.sh script on '"$(date)"'"|g' $profile_file
+            sed -i -e 's|^source.*shell-scripts/init\.sh"|source "'"${SCRIPT_DIR}/init.sh"'"|g' $profile_file
             #rm -f "$profile_file.bak"
         else
             echo -e "\n# Added by ${REPO_NAME} init.sh script on $(date)" >> "$profile_file"
@@ -74,14 +75,14 @@ select_profile_file() {
 
 # if curl execution, ask user to clone repo to current folder
 clone_repo() {
+    if [ -d "$REPO_NAME" ]; then
+        echo "Directory $REPO_NAME already exists. Exiting without cloning."
+        exit 1
+    fi
     #prompt user to clone
     read -p "Would you like to clone the repository now? (y/n): " clone_choice
     if [[ "$clone_choice" == "y" || "$clone_choice" == "Y" ]]; then
         #if target directory exists, prompt user to continue
-        if [ -d "$REPO_NAME" ]; then
-            echo "Directory $REPO_NAME already exists. Exiting without cloning."
-            exit 1
-        fi
         git clone "${REPO_URL}"
         echo "Repository cloned to $(pwd)/${REPO_NAME}"
     else
