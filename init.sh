@@ -79,11 +79,8 @@ clone_repo() {
     if [[ "$clone_choice" == "y" || "$clone_choice" == "Y" ]]; then
         #if target directory exists, prompt user to continue
         if [ -d "$REPO_NAME" ]; then
-            read -p "Directory $REPO_NAME already exists. Do you want to overwrite it? (y/n): " overwrite_choice
-            if [[ "$overwrite_choice" != "y" && "$overwrite_choice" != "Y" ]]; then
-                echo "Exiting without cloning."
-                exit 1
-            fi
+            echo "Directory $REPO_NAME already exists. Exiting without cloning."
+            exit 1
         fi
         git clone "${REPO_URL}"
         echo "Repository cloned to $(pwd)/${REPO_NAME}"
