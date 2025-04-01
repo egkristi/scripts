@@ -1,0 +1,193 @@
+#!/bin/bash
+
+# Script to cat all files in a folder and subfolders with LLM-friendly output format
+
+usage() {
+    echo "Usage: $0 [options] [directory]"
+    echo "Options:"
+    echo "  -i EXTENSIONS   Include only files with specified extensions (comma-separated, e.g., \"txt,md,sh\")"
+    echo "  -e EXTENSIONS   Exclude files with specified extensions (comma-separated, e.g., \"log,tmp,bak\")"
+    echo "  -d DIRECTORY    Specify target directory (alternative to providing it as last argument)"
+    echo "  -v              Verbose mode (show skipped files)"
+    echo "  -h              Show this help message"
+    exit 1
+}
+
+# Initialize variables
+target_dir="."
+include_extensions=""
+exclude_extensions=""
+verbose=false
+
+# Parse command line arguments
+while getopts "i:e:d:vh" opt; do
+  case $opt in
+    i) include_extensions="$OPTARG" ;;
+    e) exclude_extensions="$OPTARG" ;;
+    d) target_dir="$OPTARG" ;;
+    v) verbose=true ;;
+    h) usage ;;
+    \?) echo "Invalid option: -$OPTARG" >&2; usage ;;
+  esac
+done
+
+# Check if both include and exclude patterns are provided
+if [ -n "$include_extensions" ] && [ -n "$exclude_extensions" ]; then
+    echo "Error: Cannot use both include (-i) and exclude (-e) filters simultaneously"
+    exit 1
+fi
+
+# Shift the processed options
+shift $((OPTIND-1))
+
+# If no directory specified with -d but a positional argument exists, use it
+if [ "$target_dir" = "." ] && [ $# -eq 1 ]; then
+    target_dir="$1"
+fi
+
+# Ensure the target directory exists
+if [ ! -d "$target_dir" ]; then
+    echo "Error: '$target_dir' is not a valid directory"
+    exit 1
+fi
+
+# Variables to store TOC and content
+toc=""
+content=""
+file_counter=0
+file_list=()
+file_metadata=()
+
+# Function to output skip messages only in verbose mode
+log_skip() {
+    if [ "$verbose" = true ]; then
+        skip_msg="<!-- SKIPPED_FILE: $1 (Reason: $2) -->\n\n"
+        content="${content}${skip_msg}"
+    fi
+}
+
+# Convert comma-separated extensions to regex pattern
+extensions_to_pattern() {
+    local extensions="$1"
+    local pattern=""
+    
+    if [ -n "$extensions" ]; then
+        IFS=',' read -ra ext_array <<< "$extensions"
+        for ext in "${ext_array[@]}"; do
+            ext=$(echo "$ext" | xargs)
+            if [ -n "$pattern" ]; then
+                pattern="$pattern|"
+            fi
+            pattern="${pattern}\\.${ext}\$"
+        done
+    fi
+    
+    echo "$pattern"
+}
+
+# Create patterns from extensions
+include_pattern=$(extensions_to_pattern "$include_extensions")
+exclude_pattern=$(extensions_to_pattern "$exclude_extensions")
+
+# First pass: collect all matching files
+while read -r file; do
+    filename=$(basename "$file")
+    
+    # Apply include filter
+    if [ -n "$include_pattern" ]; then
+        if ! echo "$filename" | grep -E "$include_pattern" >/dev/null; then
+            log_skip "$file" "not in include filter"
+            continue
+        fi
+    fi
+    
+    # Apply exclude filter
+    if [ -n "$exclude_pattern" ]; then
+        if echo "$filename" | grep -E "$exclude_pattern" >/dev/null; then
+            log_skip "$file" "matched exclude filter"
+            continue
+        fi
+    fi
+    
+    # Check if it's a text file
+    if file "$file" | grep -q "text"; then
+        file_list+=("$file")
+        
+        # Get file extension for language detection
+        extension="${filename##*.}"
+        # Get line count
+        line_count=$(wc -l < "$file")
+        # Get file size
+        file_size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
+        
+        # Store metadata
+        file_metadata+=("$extension|$line_count|$file_size")
+    else
+        log_skip "$file" "non-text file"
+    fi
+done < <(find "$target_dir" -type f | sort)
+
+# Generate structured TOC
+toc="<!-- BEGIN_FILE_INVENTORY -->\n"
+toc="${toc}# File Inventory\n\n"
+toc="${toc}Total files: ${file_counter}\n\n"
+toc="${toc}| ID | Path | Type | Lines | Size |\n"
+toc="${toc}|---:|:-----|:-----|------:|-----:|\n"
+
+# Second pass: process matching files and build TOC and content
+for i in "${!file_list[@]}"; do
+    file="${file_list[$i]}"
+    file_counter=$((i + 1))
+    
+    # Parse metadata
+    IFS='|' read -r extension line_count file_size <<< "${file_metadata[$i]}"
+    
+    # Add to TOC table
+    relative_path="${file#$target_dir/}"
+    if [ "$relative_path" = "$file" ]; then
+        relative_path="${file#./}"
+    fi
+    toc="${toc}| ${file_counter} | \`${relative_path}\` | ${extension} | ${line_count} | ${file_size} |\n"
+    
+    # Determine language for code fence
+    lang=""
+    case "$extension" in
+        js)      lang="javascript" ;;
+        py)      lang="python" ;;
+        rb)      lang="ruby" ;;
+        sh|bash) lang="bash" ;;
+        php)     lang="php" ;;
+        java)    lang="java" ;;
+        go)      lang="go" ;;
+        rs)      lang="rust" ;;
+        cpp|cc)  lang="cpp" ;;
+        c)       lang="c" ;;
+        cs)      lang="csharp" ;;
+        ts)      lang="typescript" ;;
+        html)    lang="html" ;;
+        css)     lang="css" ;;
+        md)      lang="markdown" ;;
+        json)    lang="json" ;;
+        xml)     lang="xml" ;;
+        yaml|yml) lang="yaml" ;;
+        *)       lang="text" ;;
+    esac
+    
+    # Add to content with structured format
+    content="${content}<!-- BEGIN_FILE id=\"${file_counter}\" path=\"${file}\" -->\n"
+    content="${content}## File ${file_counter}: \`${relative_path}\`\n\n"
+    content="${content}**Type:** ${extension} | **Lines:** ${line_count} | **Size:** ${file_size} bytes\n\n"
+    content="${content}\`\`\`${lang}\n"
+    content="${content}$(cat "$file")\n"
+    content="${content}\`\`\`\n\n"
+    content="${content}<!-- END_FILE id=\"${file_counter}\" -->\n\n"
+done
+
+toc="${toc}\n<!-- END_FILE_INVENTORY -->\n\n"
+
+# Output the final result with TOC at the beginning
+if [ $file_counter -eq 0 ]; then
+    echo "No matching files found."
+else
+    echo -e "${toc}${content}"
+fi
