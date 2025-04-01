@@ -3,11 +3,6 @@
 
 REPO_URL="https://github.com/egkristi/shell-scripts.git"
 REPO_NAME="shell-scripts"
-# Check if running from curl or locally installed
-is_curl_execution() {
-  # If BASH_SOURCE is empty or "-", we're running from curl
-  [[ -z "${BASH_SOURCE[0]}" || "${BASH_SOURCE[0]}" == "-" ]]
-}
 
 # Ensure the sbin directory exists
 sbin_exists(){
@@ -97,46 +92,43 @@ clone_repo() {
 }
 
 # Check if script is being sourced
-echo "Bash source: ${BASH_SOURCE[0]}"
-echo "Current session: ${0}"
-#if ${BASH_SOURCE[0]} is empty and ${0} is not empty, then the script is being sourced 
-#if ${BASH_SOURCE[0]} empty or "-", we're running from curl
+#echo "Bash source: ${BASH_SOURCE[0]}"
+#echo "Current session: ${0}"
+#echo "Current script: ${0##*/}"
 
-if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
-    # Sourced: just add to current session and list scripts
+#if ${BASH_SOURCE[0]} is empty and ${0} is not empty, and ${0} ends with script name, then the script is executed from local installation
+if [[ "${BASH_SOURCE##*/}" == "init.sh" && "${0##*/}" == "init.sh" ]]; then
+    echo "Script is being executed locally"
+    SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+    SBIN_DIR="${SCRIPT_DIR}/sbin"
+    sbin_exists
+    profile_file=$(select_profile_file)
+    
+    if [ -z "$profile_file" ]; then
+        echo "Unsupported shell: $(basename "$SHELL")"
+        echo "Please add the following line to your shell profile manually:"
+        echo "source \"${SCRIPT_DIR}/init.sh\""
+    else
+        echo "Setting up automatic initialization..."
+        add_to_profile "$profile_file"
+        
+        # Source the script for the current session
+        export PATH="${SBIN_DIR}:$PATH"
+        echo "Added ${SBIN_DIR} to PATH for current session"
+    fi
+elif [[ -z "${BASH_SOURCE[0]}" && "${0}" == "bash" ]]; then
+    echo "Script is being executed from curl"
+    clone_repo
+    SCRIPT_DIR="$(pwd)/$REPO_NAME"
+    SBIN_DIR="${SCRIPT_DIR}/sbin"
+    sbin_exists
+    add_to_current_session
+elif [[ -z "${BASH_SOURCE##*/}" && "${0##*/}" == "init.sh" ]]; then
+    #echo "Script is being sourced: just add to current session and list scripts"
     SCRIPT_DIR=$(dirname "$0")
     SBIN_DIR="${SCRIPT_DIR}/sbin"
     sbin_exists
     add_to_current_session
-else # Executed directly: add to profile and source for current session
-    # Check if running from curl or local installation
-    if is_curl_execution; then
-        clone_repo
-        SCRIPT_DIR="$(pwd)/$REPO_NAME"
-        SBIN_DIR="${SCRIPT_DIR}/sbin"
-        sbin_exists
-        add_to_current_session
-    else
-        echo "Running from local installation."
-        SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-        SBIN_DIR="${SCRIPT_DIR}/sbin"
-        sbin_exists
-        profile_file=$(select_profile_file)
-        
-        if [ -z "$profile_file" ]; then
-            echo "Unsupported shell: $(basename "$SHELL")"
-            echo "Please add the following line to your shell profile manually:"
-            echo "source \"${SCRIPT_DIR}/init.sh\""
-        else
-            echo "Setting up automatic initialization..."
-            add_to_profile "$profile_file"
-            
-            # Source the script for the current session
-            export PATH="${SBIN_DIR}:$PATH"
-            echo "Added ${SBIN_DIR} to PATH for current session"
-            
-            echo
-            echo "Setup complete! The scripts will be available in this and all future sessions."
-        fi
-    fi
+else
+    echo "Script is being executed from an unknown source"
 fi
