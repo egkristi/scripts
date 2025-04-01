@@ -97,6 +97,11 @@ clone_repo() {
 }
 
 # Check if script is being sourced
+echo "Bash source: ${BASH_SOURCE[0]}"
+echo "Current session: ${0}"
+#if ${BASH_SOURCE[0]} is empty and ${0} is not empty, then the script is being sourced 
+#if ${BASH_SOURCE[0]} empty or "-", we're running from curl
+
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     # Sourced: just add to current session and list scripts
     SCRIPT_DIR=$(dirname "$0")
