@@ -130,7 +130,7 @@ done < <(find "$target_dir" -type f | sort)
 # Generate structured TOC
 toc="<!-- BEGIN_FILE_INVENTORY -->\n"
 toc="${toc}# File Inventory\n\n"
-toc="${toc}Total files: ${file_counter}\n\n"
+toc="${toc}Total files: ${#file_list[@]} \n\n"
 toc="${toc}| ID | Path | Type | Lines | Size |\n"
 toc="${toc}|---:|:-----|:-----|------:|-----:|\n"
 
