@@ -8,6 +8,7 @@ usage() {
     echo "  -i EXTENSIONS   Include only files with specified extensions (comma-separated, e.g., \"txt,md,sh\")"
     echo "  -e EXTENSIONS   Exclude files with specified extensions (comma-separated, e.g., \"log,tmp,bak\")"
     echo "  -d DIRECTORY    Specify target directory (alternative to providing it as last argument)"
+    echo "  -H              Exclude hidden files and directories (those starting with .)"
     echo "  -v              Verbose mode (show skipped files)"
     echo "  -h              Show this help message"
     exit 1
@@ -18,14 +19,16 @@ target_dir="."
 include_extensions=""
 exclude_extensions=""
 verbose=false
+exclude_hidden=false
 
 # Parse command line arguments
-while getopts "i:e:d:vh" opt; do
+while getopts "i:e:d:vHh" opt; do
   case $opt in
     i) include_extensions="$OPTARG" ;;
     e) exclude_extensions="$OPTARG" ;;
     d) target_dir="$OPTARG" ;;
     v) verbose=true ;;
+    H) exclude_hidden=true ;;
     h) usage ;;
     \?) echo "Invalid option: -$OPTARG" >&2; usage ;;
   esac
@@ -90,8 +93,22 @@ include_pattern=$(extensions_to_pattern "$include_extensions")
 exclude_pattern=$(extensions_to_pattern "$exclude_extensions")
 
 # First pass: collect all matching files
+if [ "$exclude_hidden" = true ]; then
+    # Exclude hidden files and directories
+    find_command="find \"$target_dir\" -type f -not -path \"*/\\.*\" | sort"
+else
+    # Include all files
+    find_command="find \"$target_dir\" -type f | sort"
+fi
+
 while read -r file; do
     filename=$(basename "$file")
+    
+    # Skip hidden files if the option is set
+    if [ "$exclude_hidden" = true ] && [[ "$filename" == .* ]]; then
+        log_skip "$file" "hidden file"
+        continue
+    fi
     
     # Apply include filter
     if [ -n "$include_pattern" ]; then
@@ -125,7 +142,7 @@ while read -r file; do
     else
         log_skip "$file" "non-text file"
     fi
-done < <(find "$target_dir" -type f | sort)
+done < <(eval "$find_command")
 
 # Generate structured TOC
 toc="<!-- BEGIN_FILE_INVENTORY -->\n"
