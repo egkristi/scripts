@@ -1,0 +1,170 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = []
+# ///
+"""
+Robust MkDocs development server wrapper.
+
+This tool provides a convenient way to serve MkDocs documentation sites with
+automatic setup and dependency management. It ensures your MkDocs project
+is properly configured and starts a development server.
+
+Features:
+- Automatically creates minimal mkdocs.yml if missing
+- Creates placeholder docs/index.md if needed
+- Optionally installs MkDocs and Material theme via uv
+- Flexible host and port configuration
+- Works with any MkDocs project structure
+
+Usage:
+  mkdocs-serve --project-root PROJECT_DIR [options]
+
+Examples:
+  # Serve a converted mirror site
+  mkdocs-serve --project-root ./mkdocs-site --install-deps
+
+  # Serve with custom host and port
+  mkdocs-serve --project-root ./docs \
+               --host 0.0.0.0 \
+               --port 8080 \
+               --install-deps
+
+  # Serve with custom docs directory
+  mkdocs-serve --project-root ./my-project \
+               --docs-subdir content \
+               --theme readthedocs
+
+  # Silent mode for automation
+  mkdocs-serve --project-root ./site \
+               --install-deps \
+               --silent
+
+Perfect companion to mirror-to-mkdocs for serving converted website mirrors
+as local documentation sites.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+
+def ensure_mkdocs_installed(install: bool, silent: bool) -> bool:
+    """Check if MkDocs is installed, optionally install it via uv."""
+    try:
+        import mkdocs  # noqa: F401
+        return True
+    except Exception:
+        if not install:
+            if not silent:
+                print("mkdocs is not installed. Re-run with --install-deps to auto-install (mkdocs, mkdocs-material).", file=sys.stderr)
+            return False
+        # Attempt to install via uv
+        if not silent:
+            print("Installing mkdocs and mkdocs-material via uv add ...")
+        try:
+            subprocess.run(["uv", "add", "mkdocs", "mkdocs-material"], check=True)
+            return True
+        except Exception as e:
+            print(f"Failed to install mkdocs: {e}", file=sys.stderr)
+            return False
+
+
+def write_minimal_mkdocs_yml(project_root: Path, docs_subdir: str, theme: str, silent: bool) -> None:
+    """Create a minimal mkdocs.yml if it doesn't exist."""
+    yml = project_root / "mkdocs.yml"
+    if yml.exists():
+        return
+    lines = [
+        "site_name: Documentation Site",
+        f"docs_dir: {docs_subdir}",
+        "theme:",
+        f"  name: {theme}",
+        "nav:",
+        "  - Home: index.md",
+    ]
+    yml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if not silent:
+        print(f"Created minimal mkdocs.yml -> {yml}")
+
+
+def ensure_docs_index(project_root: Path, docs_subdir: str, silent: bool) -> None:
+    """Create a placeholder index.md if it doesn't exist."""
+    docs = project_root / docs_subdir
+    docs.mkdir(parents=True, exist_ok=True)
+    index_md = docs / "index.md"
+    if not index_md.exists():
+        index_md.write_text("# Welcome\n\nThis is a placeholder index page.\n", encoding="utf-8")
+        if not silent:
+            print(f"Created placeholder index -> {index_md}")
+
+
+def serve(project_root: Path, host: str, port: int, silent: bool) -> int:
+    """Start the MkDocs development server."""
+    addr = f"{host}:{port}"
+    
+    # Prefer local mkdocs script via PATH
+    cmd = ["mkdocs", "serve", "-a", addr]
+    if not silent:
+        print(f"Starting MkDocs server at http://{addr}")
+        print("Press Ctrl+C to stop the server")
+    try:
+        proc = subprocess.run(cmd, cwd=str(project_root))
+        return proc.returncode
+    except FileNotFoundError:
+        print("mkdocs executable not found on PATH. Ensure dependencies are installed.", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        if not silent:
+            print("\nServer stopped.")
+        return 0
+
+
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Serve a MkDocs site with automatic setup and dependency management",
+        epilog="Examples:\n"
+               "  mkdocs-serve --project-root ./mkdocs-site --install-deps\n"
+               "  mkdocs-serve --project-root ./docs --host 0.0.0.0 --port 8080\n"
+               "  mkdocs-serve --project-root ./site --docs-subdir content --theme readthedocs",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument("--project-root", required=True, 
+                   help="MkDocs project root containing mkdocs.yml (or where it will be created)")
+    p.add_argument("--docs-subdir", default="docs", 
+                   help="Docs directory relative to project root (default: docs)")
+    p.add_argument("--host", default="127.0.0.1", 
+                   help="Host to bind (default: 127.0.0.1)")
+    p.add_argument("--port", type=int, default=8000, 
+                   help="Port to bind (default: 8000)")
+    p.add_argument("--install-deps", action="store_true", 
+                   help="Install mkdocs and material theme if missing (via uv add)")
+    p.add_argument("--theme", default="material", 
+                   help="Theme name for mkdocs.yml when auto-generating (default: material)")
+    p.add_argument("--silent", action="store_true", 
+                   help="Reduce log output")
+    return p.parse_args(argv)
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
+    project_root = Path(args.project_root).resolve()
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    if not ensure_mkdocs_installed(args.install_deps, args.silent):
+        return 2
+
+    # Create minimal mkdocs.yml and index.md if missing
+    write_minimal_mkdocs_yml(project_root, args.docs_subdir, args.theme, args.silent)
+    ensure_docs_index(project_root, args.docs_subdir, args.silent)
+
+    # Serve
+    return serve(project_root, args.host, int(args.port), args.silent)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
