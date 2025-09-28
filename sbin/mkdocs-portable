@@ -307,6 +307,9 @@ def create_electron_files(target_dir: Path, site_name: str):
     print("Creating Electron application files...")
     
     # package.json for Electron
+    # Note: Code signing is disabled by default (identity: null)
+    # To enable code signing, replace "identity": null with your certificate:
+    # "identity": "Developer ID Application: Your Name (TEAM_ID)"
     package_json = f"""{{
   "name": "portable-docs-app",
   "version": "1.0.0",
@@ -337,7 +340,12 @@ def create_electron_files(target_dir: Path, site_name: str):
       "pyproject.toml"
     ],
     "mac": {{
-      "category": "public.app-category.education"
+      "category": "public.app-category.education",
+      "identity": null,
+      "entitlements": null,
+      "entitlementsInherit": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     }},
     "win": {{
       "target": "nsis"
@@ -553,6 +561,18 @@ If you want to create desktop applications:
 - **"uv: command not found"**: Install uv package manager (see Installation above)
 - **Permission denied on Unix**: Run `chmod +x run_unix.sh` then try again
 - **Port already in use**: Close other applications using port 8000, or edit the run scripts to use a different port
+- **macOS "App can't be opened"**: The app is not code signed. Right-click → Open, or enable code signing in package.json
+
+### Code Signing (macOS)
+
+The desktop applications are not code signed by default. To enable code signing:
+
+1. Get an Apple Developer certificate
+2. Edit `package.json` and replace `"identity": null` with your certificate:
+   ```json
+   "identity": "Developer ID Application: Your Name (TEAM_ID)"
+   ```
+3. Rebuild the applications
 
 ## Contents
 
