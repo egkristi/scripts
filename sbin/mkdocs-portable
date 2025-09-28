@@ -349,12 +349,37 @@ def create_electron_files(target_dir: Path, site_name: str):
         if identity.startswith("Developer ID Application: "):
             identity = identity.replace("Developer ID Application: ", "")
         
-        mac_config = f'''      "category": "public.app-category.education",
+        # Check if certificate actually exists in keychain for code signing
+        import subprocess
+        try:
+            result = subprocess.run([
+                "security", "find-identity", "-v", "-p", "codesigning"
+            ], capture_output=True, text=True)
+            
+            # Check if the identity is available for code signing
+            if result.returncode == 0 and identity in result.stdout:
+                print(f"✅ Found valid code signing identity: {identity}")
+                mac_config = f'''      "category": "public.app-category.education",
       "identity": "{identity}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false'''
+            else:
+                print(f"⚠️  Code signing identity not found in keychain: {identity}")
+                print("📝 Building without code signing (apps will still work but won't be signed)")
+                mac_config = '''      "category": "public.app-category.education",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false'''
+        except Exception as e:
+            print(f"⚠️  Could not check code signing identity: {e}")
+            print("📝 Building without code signing")
+            mac_config = '''      "category": "public.app-category.education",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false'''
         
-        if apple_config.get('entitlements'):
+        # Only add entitlements if code signing is enabled (identity is not null)
+        if apple_config.get('entitlements') and '"identity": null' not in mac_config:
             # Create entitlements file
             entitlements_content = '''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
