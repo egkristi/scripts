@@ -1,7 +1,7 @@
 {
   "_comment": "Apple Developer Code Signing Configuration",
   "_instructions": [
-    "Copy this file to 'apple-developer-config.json' and fill in your details",
+    "Copy this file to '.apple-developer-config.json' (hidden file) and fill in your details",
     "Get your Team ID from https://developer.apple.com/account/#!/membership/",
     "Find your certificate name in Keychain Access under 'My Certificates'",
     "The certificate should be named 'Developer ID Application: Your Name (TEAM_ID)'"

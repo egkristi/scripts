@@ -22,7 +22,7 @@ The mkdocs-portable script supports automatic code signing through a configurati
 
 1. **Copy the template:**
    ```bash
-   cp apple-developer-config.template.json apple-developer-config.json
+   cp apple-developer-config.template.json .apple-developer-config.json
    ```
 
 2. **Fill in your details:**
@@ -124,9 +124,10 @@ The default entitlements are required for Electron applications:
 - Ensure Xcode command line tools are installed: `xcode-select --install`
 
 ### Configuration Not Detected
-- Verify file is named exactly `apple-developer-config.json`
+- Verify file is named exactly `.apple-developer-config.json` (hidden file)
 - Check file is in the same directory as `apple-developer-config.template.json`
 - Ensure JSON syntax is valid (use a JSON validator)
+- Use `ls -la` to see hidden files in the directory
 
 ### Apps Still Show as Unsigned
 - Verify `"enabled": true` in configuration

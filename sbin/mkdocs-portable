@@ -308,7 +308,7 @@ def load_apple_developer_config():
     
     # Look for config file in scripts directory (where this script is located)
     script_dir = Path(__file__).parent.parent
-    config_file = script_dir / "apple-developer-config.json"
+    config_file = script_dir / ".apple-developer-config.json"
     template_file = script_dir / "apple-developer-config.template.json"
     
     if not config_file.exists():
@@ -631,7 +631,7 @@ The desktop applications are not code signed by default. To enable code signing:
 
 **Option 1: Use Apple Developer Configuration (Recommended)**
 1. Get an Apple Developer certificate
-2. Copy `apple-developer-config.template.json` to `apple-developer-config.json`
+2. Copy `apple-developer-config.template.json` to `.apple-developer-config.json`
 3. Fill in your Apple Developer details:
    ```json
    {{
