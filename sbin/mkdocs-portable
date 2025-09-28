@@ -302,14 +302,81 @@ uv run mkdocs serve -a localhost:8000
     print("Created run_unix.sh")
 
 
+def load_apple_developer_config():
+    """Load Apple Developer configuration if available."""
+    import json
+    
+    # Look for config file in scripts directory (where this script is located)
+    script_dir = Path(__file__).parent.parent
+    config_file = script_dir / "apple-developer-config.json"
+    template_file = script_dir / "apple-developer-config.template.json"
+    
+    if not config_file.exists():
+        if template_file.exists():
+            print(f"📝 Apple Developer config not found. Template available at:")
+            print(f"   {template_file}")
+            print(f"   Copy to: {config_file}")
+            print(f"   Fill in your Apple Developer details to enable code signing.")
+        return None
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            if config.get('enabled', False) and config.get('identity'):
+                print(f"✅ Using Apple Developer identity: {config['identity']}")
+                return config
+            else:
+                print(f"⚠️  Apple Developer config found but disabled or incomplete")
+                return None
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"❌ Error reading Apple Developer config: {e}")
+        return None
+
+
 def create_electron_files(target_dir: Path, site_name: str):
     """Create Electron application files."""
     print("Creating Electron application files...")
     
-    # package.json for Electron
-    # Note: Code signing is disabled by default (identity: null)
-    # To enable code signing, replace "identity": null with your certificate:
-    # "identity": "Developer ID Application: Your Name (TEAM_ID)"
+    # Load Apple Developer configuration
+    apple_config = load_apple_developer_config()
+    
+    # Configure code signing based on available configuration
+    if apple_config:
+        # Use Apple Developer configuration
+        mac_config = f'''      "category": "public.app-category.education",
+      "identity": "{apple_config['identity']}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false'''
+        
+        if apple_config.get('entitlements'):
+            # Create entitlements file
+            entitlements_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>'''
+            for key, value in apple_config['entitlements'].items():
+                bool_val = 'true' if value else 'false'
+                entitlements_content += f'''
+    <key>{key}</key>
+    <{bool_val}/>'''
+            entitlements_content += '''
+</dict>
+</plist>'''
+            
+            entitlements_file = target_dir / "entitlements.mac.plist"
+            entitlements_file.write_text(entitlements_content)
+            mac_config += f''',
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist"'''
+    else:
+        # Default unsigned configuration
+        mac_config = '''      "category": "public.app-category.education",
+      "identity": null,
+      "entitlements": null,
+      "entitlementsInherit": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false'''
+    
     package_json = f"""{{
   "name": "portable-docs-app",
   "version": "1.0.0",
@@ -340,12 +407,7 @@ def create_electron_files(target_dir: Path, site_name: str):
       "pyproject.toml"
     ],
     "mac": {{
-      "category": "public.app-category.education",
-      "identity": null,
-      "entitlements": null,
-      "entitlementsInherit": null,
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false
+{mac_config}
     }},
     "win": {{
       "target": "nsis"
@@ -567,12 +629,24 @@ If you want to create desktop applications:
 
 The desktop applications are not code signed by default. To enable code signing:
 
+**Option 1: Use Apple Developer Configuration (Recommended)**
 1. Get an Apple Developer certificate
-2. Edit `package.json` and replace `"identity": null` with your certificate:
+2. Copy `apple-developer-config.template.json` to `apple-developer-config.json`
+3. Fill in your Apple Developer details:
    ```json
-   "identity": "Developer ID Application: Your Name (TEAM_ID)"
+   {
+     "enabled": true,
+     "identity": "Developer ID Application: Your Name (TEAM_ID)",
+     "teamId": "TEAM_ID"
+   }
    ```
-3. Rebuild the applications
+4. Rebuild the applications
+
+**Option 2: Manual Configuration**
+1. Edit `package.json` and replace `"identity": null` with your certificate
+2. Rebuild the applications
+
+The configuration file method is preferred as it keeps sensitive information separate and gitignored.
 
 ## Contents
 

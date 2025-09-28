@@ -1,0 +1,28 @@
+{
+  "_comment": "Apple Developer Code Signing Configuration",
+  "_instructions": [
+    "Copy this file to 'apple-developer-config.json' and fill in your details",
+    "Get your Team ID from https://developer.apple.com/account/#!/membership/",
+    "Find your certificate name in Keychain Access under 'My Certificates'",
+    "The certificate should be named 'Developer ID Application: Your Name (TEAM_ID)'"
+  ],
+  "enabled": false,
+  "identity": "",
+  "teamId": "",
+  "appleId": "",
+  "appSpecificPassword": "",
+  "notarization": {
+    "enabled": false,
+    "comment": "Notarization requires paid Apple Developer account"
+  },
+  "entitlements": {
+    "com.apple.security.cs.allow-jit": true,
+    "com.apple.security.cs.allow-unsigned-executable-memory": true,
+    "com.apple.security.cs.disable-library-validation": true
+  },
+  "example": {
+    "identity": "Developer ID Application: John Doe (ABC123DEF4)",
+    "teamId": "ABC123DEF4",
+    "appleId": "john.doe@example.com"
+  }
+}

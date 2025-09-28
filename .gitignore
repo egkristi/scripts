@@ -1,1 +1,4 @@
 .DS_Store
+
+# Apple Developer Configuration (contains sensitive information)
+apple-developer-config.json
