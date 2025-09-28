@@ -321,8 +321,8 @@ def create_electron_files(target_dir: Path, site_name: str):
     "build-linux": "electron-builder --linux"
   }},
   "devDependencies": {{
-    "electron": "^27.0.0",
-    "electron-builder": "^24.6.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^25.0.0"
   }},
   "build": {{
     "appId": "com.portable.docs",
