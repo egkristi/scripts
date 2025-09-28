@@ -83,16 +83,25 @@ class AppleDeveloperSetup:
             console.print("❌ Unable to detect operating system")
             return False
             
-        # Check if Keychain Access is available
-        keychain_path = Path("/Applications/Utilities/Keychain Access.app")
-        if not keychain_path.exists():
+        # Check if Keychain Access is available (try multiple locations)
+        keychain_paths = [
+            Path("/System/Library/CoreServices/Applications/Keychain Access.app"),
+            Path("/Applications/Utilities/Keychain Access.app"),
+            Path("/System/Applications/Utilities/Keychain Access.app")
+        ]
+        
+        keychain_found = any(path.exists() for path in keychain_paths)
+        if not keychain_found:
             console.print("❌ Keychain Access not found")
             return False
             
         # Check if security command is available
         try:
-            subprocess.run(["security", "--help"], capture_output=True, check=True)
-        except (FileNotFoundError, subprocess.CalledProcessError):
+            result = subprocess.run(["security", "help"], capture_output=True, text=True)
+            if result.returncode not in [0, 2]:  # security help returns 2 but is working
+                console.print("❌ Security command not working properly")
+                return False
+        except FileNotFoundError:
             console.print("❌ Security command not available")
             return False
             
