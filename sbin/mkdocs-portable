@@ -343,8 +343,13 @@ def create_electron_files(target_dir: Path, site_name: str):
     # Configure code signing based on available configuration
     if apple_config:
         # Use Apple Developer configuration
+        # Extract just the name part for electron-builder (remove "Developer ID Application:" prefix)
+        identity = apple_config['identity']
+        if identity.startswith("Developer ID Application: "):
+            identity = identity.replace("Developer ID Application: ", "")
+        
         mac_config = f'''      "category": "public.app-category.education",
-      "identity": "{apple_config['identity']}",
+      "identity": "{identity}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false'''
         
