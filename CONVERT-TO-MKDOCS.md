@@ -89,7 +89,7 @@ convert-to-mkdocs \
   --output-folder INF100_H25_DOCS \
   --write-config
 
-uv run scripts/serve_mkdocs.py --project-root INF100_H25_DOCS --install-deps
+mkdocs-serve --project-root INF100_H25_DOCS --install-deps
 ```
 
 ## Notes & tips
