@@ -612,8 +612,8 @@ wheels/
 .DS_Store
 Thumbs.db
 
-# Electron build output
-dist/
+# Electron build output (cleaned up after distribution)
+# dist/
 """
     
     (target_dir / ".gitignore").write_text(gitignore_content)
@@ -658,6 +658,11 @@ def copy_distribution_files(target_dir: Path):
             file_path = dists_dir / file_name
             size_mb = file_path.stat().st_size / (1024 * 1024)
             print(f"  📦 {file_name} ({size_mb:.1f} MB)")
+        
+        # Remove the redundant dist folder after copying distribution files
+        print("Cleaning up build artifacts...")
+        shutil.rmtree(dist_dir)
+        print("  Removed: dist/ folder (build artifacts)")
     else:
         print("No distribution files found to organize.")
 
