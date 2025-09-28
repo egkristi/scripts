@@ -440,8 +440,8 @@ def create_electron_files(target_dir: Path, site_name: str):
     "build-all": "electron-builder --mac --win --linux"
   }},
   "devDependencies": {{
-    "electron": "^28.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^32.0.0",
+    "electron-builder": "^25.1.0"
   }},
   "build": {{
     "appId": "com.portable.docs",
@@ -876,6 +876,13 @@ def main():
     create_uv_files(target_dir)
     create_run_scripts(target_dir)
     
+    # Create .npmrc to suppress deprecated warnings
+    npmrc_content = """# Suppress deprecated package warnings during build
+audit=false
+fund=false
+"""
+    (target_dir / ".npmrc").write_text(npmrc_content)
+    
     # Create Electron files if requested
     if args.with_electron or args.build_electron:
         create_electron_files(target_dir, args.site_name)
@@ -893,7 +900,16 @@ def main():
             
             # Install npm dependencies
             print("Installing Node.js dependencies...")
-            subprocess.run(["npm", "install"], cwd=target_dir, check=True)
+            
+            # Set up environment to suppress warnings
+            npm_env = dict(os.environ)
+            npm_env.update({
+                'NPM_CONFIG_AUDIT': 'false',
+                'NPM_CONFIG_FUND': 'false',
+                'NPM_CONFIG_LOGLEVEL': 'error'
+            })
+            
+            subprocess.run(["npm", "install", "--silent"], cwd=target_dir, check=True, env=npm_env)
             
             # Build applications
             print("Building desktop applications...")
