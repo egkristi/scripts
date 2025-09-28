@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#     "chardet>=5.0.0",
+# ]
+# ///
 """
 General-purpose website mirroring tool with intelligent link rewriting.
 
@@ -11,6 +17,16 @@ Features:
 - Supports incremental updates and resume functionality
 - Concurrent asset downloading for performance
 - Extensive filtering and customization options
+
+Requirements:
+- Python 3.8+ (automatically managed by uv)
+- uv package manager (https://docs.astral.sh/uv/)
+
+Installation:
+  # Install uv (one-time setup)
+  curl -LsSf https://astral.sh/uv/install.sh | sh  # Unix/Mac
+  # or
+  irm https://astral.sh/uv/install.ps1 | iex       # Windows
 
 Usage:
   mirror-site --website-url https://example.com/ \
@@ -36,6 +52,9 @@ Examples:
               --include "/docs/" \
               --exclude "/admin/" \
               --max-pages 1000
+
+Note: This script uses uv's inline dependencies feature. Dependencies are
+automatically installed in an isolated environment when the script runs.
 """
 
 from __future__ import annotations
@@ -62,7 +81,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 try:
     import chardet  # type: ignore
-except Exception:  # optional
+except ImportError:
+    # chardet is declared as a dependency, so this should not happen
+    # but we handle it gracefully just in case
     chardet = None  # type: ignore
 
 # ----------------------------
