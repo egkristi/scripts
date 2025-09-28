@@ -26,6 +26,7 @@ import json
 import subprocess
 import sys
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -122,6 +123,41 @@ class AppleDeveloperSetup:
             console.print(f"⚠️  Error reading existing config: {e}")
             return None
             
+    def save_progress(self, config: Dict, step: str):
+        """Save progress to config file with current step information."""
+        config['_progress'] = {
+            'step': step,
+            'timestamp': datetime.now().isoformat(),
+            'completed_steps': config.get('_progress', {}).get('completed_steps', [])
+        }
+        
+        if step not in config['_progress']['completed_steps']:
+            config['_progress']['completed_steps'].append(step)
+            
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            self.config_file.chmod(0o600)
+            console.print(f"💾 Progress saved: {step}")
+        except IOError as e:
+            console.print(f"⚠️  Could not save progress: {e}")
+            
+    def display_progress(self, config: Dict):
+        """Display current progress status."""
+        progress = config.get('_progress', {})
+        completed_steps = progress.get('completed_steps', [])
+        last_step = progress.get('step', 'unknown')
+        timestamp = progress.get('timestamp', 'unknown')
+        
+        console.print(Panel(
+            f"[bold]Resuming setup process...[/bold]\n\n"
+            f"Last step: [cyan]{last_step}[/cyan]\n"
+            f"Timestamp: [dim]{timestamp}[/dim]\n\n"
+            f"Completed steps:\n" + 
+            "\n".join([f"✅ {step.replace('_', ' ').title()}" for step in completed_steps]),
+            title="📋 Progress Status"
+        ))
+            
     def load_template_config(self) -> Dict:
         """Load template configuration."""
         try:
@@ -140,6 +176,16 @@ class AppleDeveloperSetup:
         """Gather required information from user."""
         console.print("\n[bold]Gathering Apple Developer information...[/bold]")
         
+        # Check if we already have this information
+        if existing_config and all(key in existing_config for key in ['appleId', 'teamId', 'developerName', 'countryCode']):
+            console.print("✅ Using existing Apple Developer information")
+            return {
+                'appleId': existing_config['appleId'],
+                'teamId': existing_config['teamId'],
+                'developerName': existing_config['developerName'],
+                'countryCode': existing_config['countryCode']
+            }
+        
         # Get Apple ID
         default_apple_id = existing_config.get('appleId', '') if existing_config else ''
         apple_id = Prompt.ask(
@@ -155,21 +201,42 @@ class AppleDeveloperSetup:
         )
         
         # Get developer name
-        developer_name = Prompt.ask("Developer/Organization Name")
+        default_developer_name = existing_config.get('developerName', '') if existing_config else ''
+        developer_name = Prompt.ask(
+            "Developer/Organization Name",
+            default=default_developer_name if default_developer_name else None
+        )
         
         # Get country code
-        country_code = Prompt.ask("Country Code (2 letters)", default="US")
+        default_country_code = existing_config.get('countryCode', 'US') if existing_config else 'US'
+        country_code = Prompt.ask("Country Code (2 letters)", default=default_country_code)
         
-        return {
+        user_info = {
             'appleId': apple_id,
             'teamId': team_id,
             'developerName': developer_name,
             'countryCode': country_code
         }
         
-    def generate_csr(self, user_info: Dict) -> Tuple[str, str]:
+        # Save progress with user information
+        config = existing_config or self.load_template_config()
+        config.update(user_info)
+        self.save_progress(config, "user_information_gathered")
+        
+        return user_info
+        
+    def generate_csr(self, user_info: Dict, existing_config: Optional[Dict] = None) -> Tuple[str, str]:
         """Generate Certificate Signing Request and private key."""
         console.print("\n[bold]Generating Certificate Signing Request...[/bold]")
+        
+        # Check if CSR already exists
+        if self.csr_file.exists() and self.private_key_file.exists():
+            if existing_config and existing_config.get('_progress', {}).get('completed_steps', []):
+                if 'csr_generated' in existing_config['_progress']['completed_steps']:
+                    console.print("✅ Using existing CSR and private key")
+                    console.print(f"✅ CSR: {self.csr_file}")
+                    console.print(f"✅ Private key: {self.private_key_file}")
+                    return str(self.csr_file), str(self.private_key_file)
         
         # Generate private key
         private_key = rsa.generate_private_key(
@@ -206,6 +273,13 @@ class AppleDeveloperSetup:
         console.print(f"✅ CSR saved to: {self.csr_file}")
         console.print(f"✅ Private key saved to: {self.private_key_file}")
         console.print("⚠️  [yellow]Keep the private key secure![/yellow]")
+        
+        # Save progress
+        config = existing_config or self.load_template_config()
+        config.update(user_info)
+        config['csrPath'] = str(self.csr_file)
+        config['privateKeyPath'] = str(self.private_key_file)
+        self.save_progress(config, "csr_generated")
         
         return str(self.csr_file), str(self.private_key_file)
         
@@ -382,6 +456,10 @@ class AppleDeveloperSetup:
         # Load existing config if available
         existing_config = self.load_existing_config()
         
+        # Show progress if resuming
+        if existing_config and existing_config.get('_progress'):
+            self.display_progress(existing_config)
+        
         if existing_config and existing_config.get('enabled'):
             console.print("\n[yellow]Existing configuration found and enabled.[/yellow]")
             if not Confirm.ask("Do you want to reconfigure?", default=False):
@@ -392,7 +470,7 @@ class AppleDeveloperSetup:
         user_info = self.gather_user_information(existing_config)
         
         # Generate CSR
-        csr_path, private_key_path = self.generate_csr(user_info)
+        csr_path, private_key_path = self.generate_csr(user_info, existing_config)
         
         # Open Apple Developer portal
         self.open_apple_developer_portal(user_info)
@@ -403,6 +481,7 @@ class AppleDeveloperSetup:
         if not identity:
             console.print("❌ Could not find installed certificate")
             console.print("Please ensure you have downloaded and installed the certificate from Apple Developer portal")
+            console.print("💾 Progress has been saved - you can re-run this script after installing the certificate")
             sys.exit(1)
             
         # Verify certificate
@@ -412,6 +491,7 @@ class AppleDeveloperSetup:
             
         # Create and save configuration
         config = self.create_config(user_info, identity)
+        self.save_progress(config, "certificate_configured")
         self.save_config(config)
         
         # Display summary
