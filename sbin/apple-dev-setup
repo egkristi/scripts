@@ -200,9 +200,29 @@ class AppleDeveloperSetup:
         # Show existing information if available
         if existing_config and any(key in existing_config for key in ['appleId', 'teamId', 'developerName', 'countryCode']):
             console.print("[dim]Found existing information - press Enter to keep current values[/dim]")
+        else:
+            # Show information requirements panel for new users
+            console.print(Panel(
+                f"[bold]Information needed:[/bold]\n\n"
+                f"• [cyan]Apple ID[/cyan] - Your Apple Developer account email\n"
+                f"• [cyan]Team ID[/cyan] - 10-character code from Apple Developer portal\n"
+                f"• [cyan]Developer Name[/cyan] - Name registered with Apple Developer account\n"
+                f"• [cyan]Country Code[/cyan] - Two-letter country code (US, NO, GB, etc.)\n\n"
+                f"[yellow]Where to find Team ID:[/yellow]\n"
+                f"Apple Developer Portal → Account → Membership Details\n"
+                f"[link=https://developer.apple.com/account#MembershipDetailsCard]https://developer.apple.com/account#MembershipDetailsCard[/link]",
+                title="📋 Required Information"
+            ))
+        
+        # Offer to open helpful websites
+        console.print("\n[blue]💡 Need help finding your Apple Developer details?[/blue]")
+        if Confirm.ask("Open Apple Developer membership page to find Team ID and account details?", default=False):
+            webbrowser.open("https://developer.apple.com/account#MembershipDetailsCard")
+            console.print("✅ Opened Apple Developer membership page in browser")
         
         # Get Apple ID with existing value as default
         default_apple_id = existing_config.get('appleId', '') if existing_config else ''
+        console.print("\n[cyan]Apple ID:[/cyan] The email address for your Apple Developer account")
         apple_id = Prompt.ask(
             "Apple ID (email address)",
             default=default_apple_id if default_apple_id else None
@@ -210,6 +230,9 @@ class AppleDeveloperSetup:
         
         # Get Team ID with existing value as default
         default_team_id = existing_config.get('teamId', '') if existing_config else ''
+        console.print(f"\n[cyan]Team ID:[/cyan] Found on [link=https://developer.apple.com/account#MembershipDetailsCard]Apple Developer membership page[/link]")
+        if not default_team_id and Confirm.ask("Open membership page to find Team ID?", default=False):
+            webbrowser.open("https://developer.apple.com/account#MembershipDetailsCard")
         team_id = Prompt.ask(
             "Team ID (10-character alphanumeric)",
             default=default_team_id if default_team_id else None
@@ -217,6 +240,8 @@ class AppleDeveloperSetup:
         
         # Get developer name with existing value as default
         default_developer_name = existing_config.get('developerName', '') if existing_config else ''
+        console.print(f"\n[cyan]Developer Name:[/cyan] Your name or organization name as registered with Apple")
+        console.print("[dim]This should match the name on your Apple Developer account[/dim]")
         developer_name = Prompt.ask(
             "Developer/Organization Name",
             default=default_developer_name if default_developer_name else None
@@ -224,6 +249,7 @@ class AppleDeveloperSetup:
         
         # Get country code with existing value as default
         default_country_code = existing_config.get('countryCode', 'US') if existing_config else 'US'
+        console.print(f"\n[cyan]Country Code:[/cyan] Two-letter country code (e.g., US, NO, GB, DE)")
         country_code = Prompt.ask("Country Code (2 letters)", default=default_country_code)
         
         user_info = {
