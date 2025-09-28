@@ -157,6 +157,27 @@ class AppleDeveloperSetup:
             "\n".join([f"✅ {step.replace('_', ' ').title()}" for step in completed_steps]),
             title="📋 Progress Status"
         ))
+        
+    def display_current_config(self, config: Dict):
+        """Display current configuration values."""
+        table = Table(title="Current Configuration")
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="green")
+        
+        if config.get('appleId'):
+            table.add_row("Apple ID", config['appleId'])
+        if config.get('teamId'):
+            table.add_row("Team ID", config['teamId'])
+        if config.get('developerName'):
+            table.add_row("Developer Name", config['developerName'])
+        if config.get('countryCode'):
+            table.add_row("Country Code", config['countryCode'])
+        if config.get('identity'):
+            table.add_row("Certificate Identity", config['identity'])
+        if config.get('enabled'):
+            table.add_row("Status", "✅ Enabled" if config['enabled'] else "❌ Disabled")
+            
+        console.print(table)
             
     def load_template_config(self) -> Dict:
         """Load template configuration."""
@@ -176,38 +197,32 @@ class AppleDeveloperSetup:
         """Gather required information from user."""
         console.print("\n[bold]Gathering Apple Developer information...[/bold]")
         
-        # Check if we already have this information
-        if existing_config and all(key in existing_config for key in ['appleId', 'teamId', 'developerName', 'countryCode']):
-            console.print("✅ Using existing Apple Developer information")
-            return {
-                'appleId': existing_config['appleId'],
-                'teamId': existing_config['teamId'],
-                'developerName': existing_config['developerName'],
-                'countryCode': existing_config['countryCode']
-            }
+        # Show existing information if available
+        if existing_config and any(key in existing_config for key in ['appleId', 'teamId', 'developerName', 'countryCode']):
+            console.print("[dim]Found existing information - press Enter to keep current values[/dim]")
         
-        # Get Apple ID
+        # Get Apple ID with existing value as default
         default_apple_id = existing_config.get('appleId', '') if existing_config else ''
         apple_id = Prompt.ask(
             "Apple ID (email address)",
             default=default_apple_id if default_apple_id else None
         )
         
-        # Get Team ID
+        # Get Team ID with existing value as default
         default_team_id = existing_config.get('teamId', '') if existing_config else ''
         team_id = Prompt.ask(
             "Team ID (10-character alphanumeric)",
             default=default_team_id if default_team_id else None
         )
         
-        # Get developer name
+        # Get developer name with existing value as default
         default_developer_name = existing_config.get('developerName', '') if existing_config else ''
         developer_name = Prompt.ask(
             "Developer/Organization Name",
             default=default_developer_name if default_developer_name else None
         )
         
-        # Get country code
+        # Get country code with existing value as default
         default_country_code = existing_config.get('countryCode', 'US') if existing_config else 'US'
         country_code = Prompt.ask("Country Code (2 letters)", default=default_country_code)
         
@@ -462,9 +477,13 @@ class AppleDeveloperSetup:
         
         if existing_config and existing_config.get('enabled'):
             console.print("\n[yellow]Existing configuration found and enabled.[/yellow]")
+            self.display_current_config(existing_config)
             if not Confirm.ask("Do you want to reconfigure?", default=False):
                 console.print("✅ Using existing configuration")
                 return
+        elif existing_config and any(key in existing_config for key in ['appleId', 'teamId', 'developerName']):
+            console.print("\n[blue]Found existing configuration data (not yet enabled).[/blue]")
+            self.display_current_config(existing_config)
                 
         # Gather user information
         user_info = self.gather_user_information(existing_config)
