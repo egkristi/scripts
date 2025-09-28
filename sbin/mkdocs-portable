@@ -483,7 +483,7 @@ def create_electron_files(target_dir: Path, site_name: str, version: str = "1.0.
     "build-all": "electron-builder --mac --win --linux"
   }},
   "devDependencies": {{
-    "electron": "^32.0.0",
+    "electron": "^36.9.2",
     "electron-builder": "^25.1.0"
   }},
   "build": {{
