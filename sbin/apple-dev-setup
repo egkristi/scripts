@@ -471,7 +471,12 @@ class AppleDeveloperSetup:
             'identity': identity,
             'teamId': user_info['teamId'],
             'appleId': user_info['appleId'],
+            'developerName': user_info['developerName'],
+            'countryCode': user_info['countryCode'],
         })
+        
+        # Remove progress tracking from final config
+        config.pop('_progress', None)
         
         return config
         
@@ -480,8 +485,14 @@ class AppleDeveloperSetup:
         console.print(f"\n[bold]Saving configuration to: {self.config_file}[/bold]")
         
         try:
+            # Create a clean copy for final save, removing temporary fields
+            clean_config = config.copy()
+            clean_config.pop('_progress', None)
+            clean_config.pop('csrPath', None)
+            clean_config.pop('privateKeyPath', None)
+            
             with open(self.config_file, 'w') as f:
-                json.dump(config, f, indent=2)
+                json.dump(clean_config, f, indent=2)
                 
             # Set restrictive permissions
             self.config_file.chmod(0o600)
