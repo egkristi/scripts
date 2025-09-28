@@ -1,0 +1,1285 @@
+#!/usr/bin/env python3
+"""
+General-purpose website mirroring tool with intelligent link rewriting.
+
+Features:
+- Crawls websites recursively with configurable depth limits
+- Downloads HTML pages and assets (images, CSS, JS, PDFs, etc.)
+- Rewrites internal links to work offline
+- Respects robots.txt and implements polite crawling delays
+- Generates comprehensive indexes (JSON and Markdown)
+- Supports incremental updates and resume functionality
+- Concurrent asset downloading for performance
+- Extensive filtering and customization options
+
+Usage:
+  mirror-site --website-url https://example.com/ \
+              --target-folder ./mirror \
+              --link-depth 2 \
+              [--same-domain] [--delay-seconds 1] [--post-process]
+
+Examples:
+  # Mirror a documentation site
+  mirror-site --website-url https://docs.example.com/ \
+              --target-folder ./docs-mirror \
+              --same-domain --post-process
+
+  # Quick single-page download
+  mirror-site --website-url https://example.com/page.html \
+              --target-folder ./page \
+              --link-depth 0
+
+  # Deep crawl with filtering
+  mirror-site --website-url https://site.com/ \
+              --target-folder ./site-mirror \
+              --link-depth 5 \
+              --include "/docs/" \
+              --exclude "/admin/" \
+              --max-pages 1000
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import time
+import mimetypes
+from collections import deque
+import json
+import hashlib
+from datetime import datetime, timezone
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
+from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.request import Request, urlopen
+from email.utils import parsedate_to_datetime
+import uuid
+import threading
+from concurrent.futures import ThreadPoolExecutor, Future
+try:
+    import chardet  # type: ignore
+except Exception:  # optional
+    chardet = None  # type: ignore
+
+# ----------------------------
+# Helpers
+# ----------------------------
+
+ASSET_EXTENSIONS = {
+    # Images
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".heic", ".heif",
+    # Styles and scripts
+    ".css", ".js", ".mjs", ".map",
+    # Fonts
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    # Data
+    ".json", ".csv", ".tsv", ".xml", ".yml", ".yaml",
+    # Documents
+    ".pdf", ".md", ".rtf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".epub", ".odt", ".ods", ".odp",
+    # Code and notebooks
+    ".ipynb", ".py",
+    # Media
+    ".mp3", ".wav", ".ogg", ".mp4", ".webm", ".ogv", ".mov", ".m4v", ".mkv",
+    # Archives and binaries
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".zst", ".7z", ".rar", ".wasm",
+}
+
+HTML_EXTENSIONS = {".html", ".htm", ""}
+
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0."
+
+
+def is_probably_html_url(url: str) -> bool:
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    ext = os.path.splitext(path)[1].lower()
+    # No extension or .html/htm or endswith '/'
+    return (ext in HTML_EXTENSIONS) or url.endswith("/")
+
+
+def is_asset_url(url: str) -> bool:
+    ext = os.path.splitext(urlparse(url).path)[1].lower()
+    return ext in ASSET_EXTENSIONS
+
+
+def normalize_base_url(url: str) -> str:
+    # Ensure trailing slash, strip fragments/query
+    p = urlparse(url)
+    p = p._replace(params="", query="", fragment="")
+    s = urlunparse(p)
+    if not s.endswith("/"):
+        s += "/"
+    return s
+
+
+def same_domain(url_a: str, url_b: str) -> bool:
+    a = urlparse(url_a)
+    b = urlparse(url_b)
+    return (a.scheme, a.netloc) == (b.scheme, b.netloc)
+
+
+@dataclass
+class ParsedLinks:
+    hrefs: List[str]
+    srcs: List[str]
+
+
+class LinkExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hrefs: List[str] = []
+        self.srcs: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
+        # Collect href/src values
+        for (k, v) in attrs:
+            if v is None:
+                continue
+            if k.lower() == "href":
+                self.hrefs.append(v)
+            elif k.lower() == "src":
+                self.srcs.append(v)
+
+    def get_parsed(self) -> ParsedLinks:
+        return ParsedLinks(self.hrefs, self.srcs)
+
+
+# ----------------------------
+# Mirroring core
+# ----------------------------
+
+@dataclass
+class MirrorConfig:
+    base_url: str
+    target_folder: Path  # mirror root
+    depth: int
+    same_domain_only: bool
+    delay_seconds: float
+    timeout: int
+    user_agent: str
+    # If True, suppress progress output
+    silent: bool
+    # If True, re-download all files even if they exist
+    force: bool
+    # Index/output settings
+    index_json: str
+    index_md: str
+    no_hash: bool
+    index_log: str
+    index_interval_files: int
+    index_interval_seconds: float
+    # Behavior flags
+    allow_all_assets: bool
+    include: Optional[str]
+    exclude: Optional[str]
+    max_pages: Optional[int]
+    concurrency: int
+
+
+class SiteMirror:
+    def __init__(self, cfg: MirrorConfig):
+        self.cfg = cfg
+        self.visited_pages: Set[str] = set()     # HTML pages fetched
+        self.visited_assets: Set[str] = set()    # Assets fetched
+        self.url_to_local: Dict[str, Path] = {}  # Absolute URL -> local absolute file path
+        # Metadata captured during this run
+        self.url_headers: Dict[str, Dict[str, str]] = {}
+        self.url_fetched_at: Dict[str, str] = {}  # ISO timestamp when we fetched
+        self.url_status: Dict[str, int] = {}
+        self.url_final: Dict[str, str] = {}
+        self.page_out_links: Dict[str, List[str]] = {}
+        self.page_meta: Dict[str, Dict[str, object]] = {}
+        self.skipped_urls: List[Dict[str, object]] = []
+        self.crawl_errors: List[Dict[str, object]] = []
+        self.run_id: str = str(uuid.uuid4())
+        self.crawl_delay_effective: float = self.cfg.delay_seconds
+        self.disallow_rules: List[str] = []
+        self.url_info: Dict[str, Dict[str, object]] = {}  # depth, referers
+        self._lock = threading.RLock()
+        self._executor: Optional[ThreadPoolExecutor] = None
+        self._futures: List[Future] = []
+        self._index_file_events = 0
+        self._index_last_write = time.time()
+
+    def log(self, msg: str) -> None:
+        if not self.cfg.silent:
+            print(msg)
+
+    def seed_from_existing_index(self) -> None:
+        """If an index JSON exists in target, load it and seed internal maps.
+
+        This supports incremental runs and preserves graph/URL metadata between runs.
+        """
+        try:
+            idx_path = self.cfg.target_folder / self.cfg.index_json
+            if not idx_path.exists():
+                return
+            payload = json.loads(idx_path.read_text(encoding='utf-8'))
+            # Support both new object schema and legacy list schema
+            if isinstance(payload, dict):
+                # urls map -> url_to_local and metadata
+                urls = payload.get("urls", {}) or {}
+                for url, rec in urls.items():
+                    try:
+                        local_rel = rec.get("local_path")
+                        if local_rel:
+                            self.url_to_local[url] = (self.cfg.target_folder / local_rel)
+                        if rec.get("headers"):
+                            self.url_headers[url] = rec.get("headers") or {}
+                        if rec.get("downloaded_at"):
+                            self.url_fetched_at[url] = rec.get("downloaded_at") or ""
+                        if rec.get("http_status") is not None:
+                            self.url_status[url] = int(rec.get("http_status"))
+                        if rec.get("final_url"):
+                            self.url_final[url] = rec.get("final_url") or url
+                    except Exception:
+                        continue
+                # graph out_edges
+                graph = payload.get("graph", {}) or {}
+                out_edges = graph.get("out_edges", {}) or {}
+                if isinstance(out_edges, dict):
+                    self.page_out_links = {k: list(v) if isinstance(v, list) else [] for k, v in out_edges.items()}
+                # page_meta may be embedded in items; attach by source_url
+                items = payload.get("items", []) or []
+                for it in items:
+                    try:
+                        if it.get("type") == "file" and it.get("kind") == "page" and it.get("source_url") and it.get("page_meta"):
+                            self.page_meta[it["source_url"]] = it["page_meta"]
+                    except Exception:
+                        pass
+            else:
+                # Legacy list of entries: cannot seed much besides source_url mapping
+                for it in payload:
+                    try:
+                        src = it.get("source_url")
+                        if src:
+                            self.url_to_local[src] = self.cfg.target_folder / it.get("path", "")
+                    except Exception:
+                        pass
+            self.log("Seeded state from existing index.")
+        except Exception:
+            # Non-fatal
+            pass
+
+    def fetch_url(self, url: str) -> Tuple[Optional[bytes], Optional[str], Dict[str, str], Optional[int], Optional[str]]:
+        # Conditional GET headers (only when not forcing)
+        headers_in: Dict[str, str] = {"User-Agent": self.cfg.user_agent}
+        if not self.cfg.force:
+            prev = self.url_headers.get(url)
+            if prev:
+                if "etag" in prev:
+                    headers_in["If-None-Match"] = prev.get("etag", "")
+                if "last-modified" in prev:
+                    headers_in["If-Modified-Since"] = prev.get("last-modified", "")
+
+        backoff = 0.5
+        for attempt in range(4):
+            req = Request(url, headers=headers_in)
+            try:
+                with urlopen(req, timeout=self.cfg.timeout) as resp:
+                    content_type = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                    # Normalize headers to a simple dict with lower-cased keys
+                    headers = {k.lower(): v for k, v in resp.headers.items()}
+                    status = getattr(resp, "status", None)
+                    final_url = getattr(resp, "url", None) or resp.geturl()
+                    data = resp.read() if status != 304 else b""
+                    return data, content_type, headers, status, final_url
+            except Exception as e:
+                if attempt == 3:
+                    if not self.cfg.silent:
+                        print(f"WARN: Failed to fetch {url}: {e}")
+                    # Record crawl error
+                    try:
+                        self.crawl_errors.append({
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "url": url,
+                            "stage": "fetch",
+                            "error": str(e),
+                        })
+                    except Exception:
+                        pass
+                    return None, None, {}, None, None
+                time.sleep(backoff)
+                backoff *= 2
+
+    # ---------- Index helpers ----------
+    def _sha256sum(self, p: Path) -> Optional[str]:
+        if self.cfg.no_hash:
+            return None
+        h = hashlib.sha256()
+        try:
+            with p.open('rb') as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                    h.update(chunk)
+            return h.hexdigest()
+        except Exception:
+            return None
+
+    def _write_event_log(self, *, path: Path, kind: str, action: str, source_url: Optional[str] = None) -> None:
+        """Append a JSON line to the index log for each processed item."""
+        try:
+            log_path = self.cfg.target_folder / self.cfg.index_log
+            entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "path": path.relative_to(self.cfg.target_folder).as_posix(),
+                "type": kind,
+                "action": action,
+                "source_url": source_url,
+            }
+            with log_path.open('a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    def build_full_index(self) -> None:
+        target_folder = self.cfg.target_folder
+        # Map local absolute paths to source URLs
+        local_to_url: Dict[Path, str] = {}
+        for url, local_path in self.url_to_local.items():
+            try:
+                local_to_url[local_path.resolve()] = url
+            except Exception:
+                pass
+
+        index_entries: List[Dict[str, object]] = []
+        # Files
+        for root, dirs, files in os.walk(target_folder):
+            root_path = Path(root)
+            for name in files:
+                fp = root_path / name
+                # Skip index files at root
+                if fp.parent == target_folder and fp.name in {self.cfg.index_json, self.cfg.index_md, self.cfg.index_log}:
+                    continue
+                stat = fp.stat()
+                rel = fp.relative_to(target_folder).as_posix()
+                name_only = fp.name
+                ext = os.path.splitext(name_only)[1].lower()
+                # Section
+                first_seg = rel.split("/", 1)[0] if rel and rel != "." else "."
+                entry: Dict[str, object] = {
+                    "path": rel,
+                    "type": "file",
+                    "size": stat.st_size,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "mime": mimetypes.guess_type(fp.name)[0] or "application/octet-stream",
+                    "target_abs_path": str(fp.resolve()),
+                    "target_root": str(target_folder.resolve()),
+                    "name": name_only,
+                    "ext": ext,
+                    "section": first_seg,
+                }
+                abs_fp = fp.resolve()
+                if not self.cfg.no_hash:
+                    entry["sha256"] = self._sha256sum(fp)
+                if abs_fp in local_to_url:
+                    src = local_to_url[abs_fp]
+                    entry["source_url"] = src
+                    entry["kind"] = "asset" if is_asset_url(src) else "page"
+                    # Attach original headers-derived metadata if available
+                    h = self.url_headers.get(src, {})
+                    if h:
+                        if "etag" in h:
+                            entry["original_etag"] = h.get("etag")
+                        if "content-md5" in h:
+                            entry["original_checksum_header"] = h.get("content-md5")
+                        if "last-modified" in h:
+                            try:
+                                entry["original_last_modified"] = parsedate_to_datetime(h.get("last-modified", "")).astimezone(timezone.utc).isoformat()
+                            except Exception:
+                                entry["original_last_modified"] = h.get("last-modified")
+                        if "content-length" in h:
+                            try:
+                                entry["original_content_length"] = int(h.get("content-length", "0"))
+                            except Exception:
+                                entry["original_content_length"] = h.get("content-length")
+                        if "content-type" in h:
+                            entry["original_content_type"] = h.get("content-type")
+                    if src in self.url_fetched_at:
+                        entry["downloaded_at"] = self.url_fetched_at[src]
+                    if src in self.url_status:
+                        entry["http_status"] = self.url_status[src]
+                    if src in self.url_final:
+                        entry["final_url"] = self.url_final[src]
+                # If a page, attach extracted page meta when available
+                if entry.get("kind") == "page" and src in self.page_meta:
+                    entry["page_meta"] = self.page_meta[src]
+                index_entries.append(entry)
+
+        # Directory aggregates
+        dir_info: Dict[Path, Dict[str, int]] = {}
+        for e in index_entries:
+            p = target_folder / e["path"]  # file path
+            parent = p.parent
+            while parent.is_dir() and parent != target_folder.parent:
+                d = dir_info.setdefault(parent, {"size": 0, "items": 0})
+                d["size"] += int(e["size"])  # type: ignore
+                d["items"] += 1
+                if parent == target_folder:
+                    break
+                parent = parent.parent
+
+        for dpath, info in dir_info.items():
+            rel = dpath.relative_to(target_folder).as_posix() if dpath != target_folder else "."
+            # Section derived from first path segment
+            first_seg = rel.split("/", 1)[0] if rel and rel != "." else "."
+            index_entries.append({
+                "path": rel,
+                "type": "dir",
+                "size": info["size"],
+                "items": info["items"],
+                "kind": "dir",
+                "name": Path(rel).name if rel != "." else ".",
+                "ext": "",
+                "section": first_seg,
+            })
+
+        # Build graph of outbound links captured during crawl (by URL)
+        graph_out = self.page_out_links
+        # Build reverse graph (inbound links)
+        graph_in: Dict[str, List[str]] = {}
+        for src_url, outs in graph_out.items():
+            for dst in outs:
+                graph_in.setdefault(dst, []).append(src_url)
+        for k in list(graph_in.keys()):
+            graph_in[k] = sorted(set(graph_in[k]))
+
+        # Construct URL-centric map for fetched/seen URLs
+        urls_map: Dict[str, Dict[str, object]] = {}
+        for url, local_path in self.url_to_local.items():
+            info = self.url_info.get(url, {})
+            referers = []
+            try:
+                r = info.get("referers")  # type: ignore
+                if isinstance(r, set):
+                    referers = sorted(r)
+                elif isinstance(r, list):
+                    referers = sorted(set(r))
+            except Exception:
+                referers = []
+            depth_val = None
+            try:
+                depth_val = int(info.get("depth"))  # type: ignore
+            except Exception:
+                depth_val = None
+            rec: Dict[str, object] = {
+                "url": url,
+                "final_url": self.url_final.get(url, url),
+                "http_status": self.url_status.get(url),
+                "headers": self.url_headers.get(url, {}),
+                "downloaded_at": self.url_fetched_at.get(url),
+                "local_path": str(local_path.relative_to(target_folder)),
+                "kind": "asset" if is_asset_url(url) else ("page" if is_probably_html_url(url) else "unknown"),
+                "referers": referers,
+                "depth": depth_val,
+            }
+            urls_map[url] = rec
+
+        # Write JSON (only JSON during crawl; Markdown is generated at the end)
+        json_path = target_folder / self.cfg.index_json
+        payload = {
+            "meta": {
+                "base_url": self.cfg.base_url,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "target_root": str(target_folder.resolve()),
+                "items_count": len(index_entries),
+                "tool": "mirror_site.py",
+                "tool_version": "1",
+                "schema_version": 1,
+                "run_id": self.run_id,
+            },
+            "items": sorted(index_entries, key=lambda x: (x["type"], x["path"])),
+            "graph": {"out_edges": graph_out, "in_edges": graph_in},
+            "urls": urls_map,
+            "skipped_urls": self.skipped_urls,
+            "errors": self.crawl_errors,
+        }
+        with json_path.open('w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        if not self.cfg.silent:
+            self.log(f"Updated index file: {json_path.name}")
+
+        self._index_last_write = time.time()
+        self._index_file_events = 0
+
+    def _maybe_update_index(self):
+        self._index_file_events += 1
+        now = time.time()
+        if (self._index_file_events >= self.cfg.index_interval_files) or (
+            now - self._index_last_write >= self.cfg.index_interval_seconds
+        ):
+            self.build_full_index()
+
+    def url_to_page_path(self, url: str) -> Path:
+        # Map an HTML URL to <mirror>/<path>/index.html or page.html
+        p = urlparse(url)
+        path = p.path
+        if path == "" or path == "/":
+            return self.cfg.target_folder / "index.html"
+        if path.endswith("/"):
+            return self.cfg.target_folder / path.lstrip("/") / "index.html"
+        root, ext = os.path.splitext(path)
+        # If there's no extension, many servers serve it like a directory page
+        # (e.g., "/notat" -> "/notat/"). To avoid directory-file collisions,
+        # store such URLs as <dir>/index.html as well.
+        if ext == "":
+            return self.cfg.target_folder / path.lstrip("/") / "index.html"
+        if ext.lower() in {".html", ".htm"}:
+            # Save as actual .html file name if provided
+            return self.cfg.target_folder / path.lstrip("/")
+        else:
+            # Not HTML — treat as asset
+            return self.cfg.target_folder / path.lstrip("/")
+
+    def url_to_asset_path(self, url: str) -> Path:
+        p = urlparse(url)
+        path = p.path
+        if path.endswith("/") or path == "":
+            # Should not happen for assets, but ensure filename
+            return self.cfg.target_folder / path.lstrip("/") / "index.bin"
+        return self.cfg.target_folder / path.lstrip("/")
+
+    def url_to_local_path(self, url: str) -> Path:
+        """Map any URL (asset or page) to its local path without fetching."""
+        if is_asset_url(url):
+            return self.url_to_asset_path(url)
+        # Might be HTML or extensionless directory-like
+        return self.url_to_page_path(url)
+
+    def ensure_parent(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save_file(self, path: Path, data: bytes) -> None:
+        self.ensure_parent(path)
+        path.write_bytes(data)
+
+    def save_page_html(self, path: Path, html: bytes) -> None:
+        self.ensure_parent(path)
+        path.write_bytes(html)
+
+    def relativize(self, from_path: Path, to_path: Path) -> str:
+        # Return a POSIX-style relative path from from_path's parent
+        rel = os.path.relpath(to_path, start=from_path.parent)
+        return Path(rel).as_posix()
+
+    def rewrite_links_in_html(self, html: str, page_local_path: Path, links: ParsedLinks, current_page_url: str) -> str:
+        # Build replacement pairs for both original attribute values and absolute URLs
+        replacements: List[Tuple[str, str]] = []
+
+        def consider(link_val: str):
+            # Resolve relative to the current page URL to preserve original relative semantics
+            abs_url = urljoin(current_page_url, link_val)
+            if abs_url in self.url_to_local:
+                rel = self.relativize(page_local_path, self.url_to_local[abs_url])
+                replacements.append((link_val, rel))
+                # also replace absolute occurrence just in case
+                replacements.append((abs_url, rel))
+
+        for href in links.hrefs:
+            consider(href)
+        for src in links.srcs:
+            consider(src)
+
+        # Replace attribute values conservatively: replace href/src occurrences
+        # Use regex to replace instances inside quotes
+        for old, new in sorted(set(replacements), key=lambda x: -len(x[0])):
+            # Replace only exact attribute values occurring within quotes to avoid over-replacing
+            # href="old" -> href="new"
+            pattern = re.compile(rf'(href|src)=(\"|\")(?:{re.escape(old)})\2')
+            html = pattern.sub(lambda m: f'{m.group(1)}="{new}"', html)
+        return html
+
+    def decode_html_bytes(self, data: bytes, headers: Dict[str, str]) -> str:
+        # Try header charset first
+        ct = headers.get("content-type", "")
+        charset_match = re.search(r"charset=([\w\-]+)", ct, flags=re.IGNORECASE)
+        if charset_match:
+            enc = charset_match.group(1).strip()
+            try:
+                return data.decode(enc, errors="replace")
+            except Exception:
+                pass
+        # Try chardet
+        if chardet is not None:
+            try:
+                guess = chardet.detect(data)
+                enc = guess.get("encoding")
+                if enc:
+                    return data.decode(enc, errors="replace")
+            except Exception:
+                pass
+        # Fallback
+        return data.decode("utf-8", errors="replace")
+
+    def load_robots(self) -> None:
+        robots_url = urljoin(self.cfg.base_url, "/robots.txt")
+        data, _ct, headers, status, final_url = self.fetch_url(robots_url)
+        if data is None or (status and status >= 400):
+            return
+        text = self.decode_html_bytes(data, headers)
+        # Simple parsing: only User-agent: * and Crawl-delay & Disallow
+        ua: Optional[str] = None
+        disallow: List[str] = []
+        delay: Optional[float] = None
+        for line in text.splitlines():
+            s = line.strip()
+            if not s or s.startswith('#'):
+                continue
+            if s.lower().startswith('user-agent:'):
+                ua = s.split(':', 1)[1].strip()
+            elif s.lower().startswith('crawl-delay:') and (ua == '*' or ua is None):
+                try:
+                    delay = float(s.split(':', 1)[1].strip())
+                except Exception:
+                    pass
+            elif s.lower().startswith('disallow:') and (ua == '*' or ua is None):
+                rule = s.split(':', 1)[1].strip()
+                if rule:
+                    disallow.append(rule)
+        self.disallow_rules = disallow
+        if delay is not None:
+            self.crawl_delay_effective = max(self.cfg.delay_seconds, delay)
+
+    def robots_allowed(self, url: str) -> bool:
+        p = urlparse(url)
+        path = p.path or '/'
+        for rule in self.disallow_rules:
+            if path.startswith(rule):
+                return False
+        return True
+
+    def match_filters(self, url: str) -> bool:
+        path = urlparse(url).path
+        if self.cfg.include and (self.cfg.include not in path):
+            return False
+        if self.cfg.exclude and (self.cfg.exclude in path):
+            return False
+        return True
+
+    def is_asset(self, url: str) -> bool:
+        if self.cfg.allow_all_assets:
+            return not is_probably_html_url(url)
+        return is_asset_url(url)
+
+    def extract_page_metadata(self, html: str) -> Dict[str, object]:
+        meta: Dict[str, object] = {}
+        # title
+        m = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            meta["title"] = re.sub(r"\s+", " ", m.group(1)).strip()
+        # meta description
+        m = re.search(r"<meta[^>]+name=[\"']description[\"'][^>]+content=[\"'](.*?)[\"']", html, flags=re.IGNORECASE)
+        if m:
+            meta["meta_description"] = m.group(1).strip()
+        # canonical
+        m = re.search(r"<link[^>]+rel=[\"']canonical[\"'][^>]+href=[\"'](.*?)[\"']", html, flags=re.IGNORECASE)
+        if m:
+            meta["canonical_url"] = m.group(1).strip()
+        # robots
+        m = re.search(r"<meta[^>]+name=[\"']robots[\"'][^>]+content=[\"'](.*?)[\"']", html, flags=re.IGNORECASE)
+        if m:
+            meta["robots"] = m.group(1).strip()
+        # hreflang
+        langs = re.findall(r"<link[^>]+rel=[\"']alternate[\"'][^>]+hreflang=[\"'](.*?)[\"'][^>]+href=[\"'](.*?)[\"']", html, flags=re.IGNORECASE)
+        if langs:
+            meta["hreflang"] = [{"lang": a, "href": b} for a, b in langs]
+        # headings (h1,h2)
+        h1s = [re.sub(r"<.*?>", "", x).strip() for x in re.findall(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)]
+        h2s = [re.sub(r"<.*?>", "", x).strip() for x in re.findall(r"<h2[^>]*>(.*?)</h2>", html, flags=re.IGNORECASE | re.DOTALL)]
+        if h1s:
+            meta["h1"] = h1s
+        if h2s:
+            meta["h2"] = h2s
+        # word count (rough): strip tags and split
+        text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        words = [w for w in re.split(r"\s+", text) if w]
+        meta["word_count"] = len(words)
+        return meta
+
+    def post_process_html(self) -> None:
+        """Walk all .html files and convert absolute same-domain URLs to relative local paths.
+
+        This is useful to normalize any links that were not seen during crawl-time
+        rewriting (e.g., generated by scripts or discovered later).
+        """
+        base = self.cfg.base_url
+        # Precompile regex to find href/src attributes with values
+        attr_re = re.compile(r'(href|src)=(\"|\")(.*?)\2')
+
+        for root, dirs, files in os.walk(self.cfg.target_folder):
+            for name in files:
+                if not name.lower().endswith(('.html', '.htm')):
+                    continue
+                page_path = Path(root) / name
+                try:
+                    text = page_path.read_text(encoding='utf-8', errors='replace')
+                except Exception:
+                    continue
+
+                changed = False
+                def repl(m: re.Match[str]) -> str:
+                    nonlocal changed
+                    attr, quote, val = m.group(1), m.group(2), m.group(3)
+                    # Only rewrite absolute same-domain links
+                    try:
+                        abs_url = urljoin(base, val) if not val.startswith(('http://', 'https://')) else val
+                    except Exception:
+                        abs_url = val
+                    if abs_url.startswith(('http://', 'https://')) and same_domain(base, abs_url):
+                        local_target = self.url_to_local_path(abs_url)
+                        rel = self.relativize(page_path, local_target)
+                        if rel != val:
+                            changed = True
+                            return f'{attr}={quote}{rel}{quote}'
+                    return m.group(0)
+
+                new_text = attr_re.sub(repl, text)
+                if changed:
+                    try:
+                        page_path.write_text(new_text, encoding='utf-8')
+                        self._write_event_log(path=page_path, kind="page", action="post-process", source_url=None)
+                    except Exception:
+                        pass
+
+    def crawl(self):
+        base = self.cfg.base_url
+        q: deque[Tuple[str, int]] = deque()
+        q.append((base, 0))
+        # Write an initial index snapshot before starting
+        self.build_full_index()
+        # Load robots.txt (best effort)
+        self.load_robots()
+
+        with ThreadPoolExecutor(max_workers=max(1, self.cfg.concurrency)) as pool:
+            self._executor = pool
+            while q:
+                url, depth = q.popleft()
+                if depth > self.cfg.depth:
+                    continue
+                if url in self.visited_pages or url in self.visited_assets:
+                    continue
+                if self.cfg.same_domain_only and not same_domain(base, url):
+                    continue
+                # Decide expected kind based on URL (assets take precedence)
+                looks_like_asset = self.is_asset(url)
+                looks_like_html = (not looks_like_asset) and is_probably_html_url(url)
+
+                data: Optional[bytes] = None
+                content_type: Optional[str] = None
+
+                if looks_like_html:
+                    with self._lock:
+                        self.visited_pages.add(url)
+                    local_page_path = self.url_to_page_path(url)
+                    with self._lock:
+                        self.url_to_local[url] = local_page_path
+                    # If file exists and not forced, read local to resume parsing
+                    if local_page_path.exists() and not self.cfg.force:
+                        try:
+                            data = local_page_path.read_bytes()
+                            content_type = "text/html"
+                            self.log(f"[{depth}] PAGE   {url} -> {local_page_path} (resume)")
+                        except Exception:
+                            data = None
+                    if data is None:
+                        data, content_type, headers, status, final_url = self.fetch_url(url)
+                        if data is None:
+                            continue
+                        # Record metadata for this fetch
+                        with self._lock:
+                            self.url_headers[url] = headers
+                            self.url_fetched_at[url] = datetime.now(timezone.utc).isoformat()
+                            if status is not None:
+                                self.url_status[url] = status
+                            if final_url:
+                                self.url_final[url] = final_url
+                        self.log(f"[{depth}] PAGE   {url} -> {local_page_path}")
+                    # Decode HTML with charset detection
+                    html_text = self.decode_html_bytes(data, self.url_headers.get(url, {}))
+                    # Extract links
+                    parser = LinkExtractor()
+                    try:
+                        parser.feed(html_text)
+                    except Exception:
+                        # In case of malformed HTML, proceed with what we have
+                        pass
+                    links = parser.get_parsed()
+
+                    # Extract page metadata
+                    try:
+                        self.page_meta[url] = self.extract_page_metadata(html_text)
+                    except Exception as _e:
+                        pass
+
+                    # Queue child pages and collect assets
+                    discovered: List[str] = []
+                    out_links: List[str] = []
+                    for raw in links.hrefs + links.srcs:
+                        abs_url = urljoin(url, raw)
+                        # Skip mailto:, javascript:, data:
+                        if abs_url.startswith("mailto:") or abs_url.startswith("javascript:") or abs_url.startswith("data:"):
+                            # track skipped
+                            self.skipped_urls.append({
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                                "url": abs_url,
+                                "reason": "non-http(s) scheme",
+                                "from": url,
+                            })
+                            continue
+                        if abs_url.startswith("file:"):
+                            self.skipped_urls.append({
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                                "url": abs_url,
+                                "reason": "file-scheme",
+                                "from": url,
+                            })
+                            continue
+                        if self.cfg.same_domain_only and not same_domain(base, abs_url):
+                            self.skipped_urls.append({
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                                "url": abs_url,
+                                "reason": "out-of-domain",
+                                "from": url,
+                            })
+                            continue
+                        if not self.robots_allowed(abs_url):
+                            self.skipped_urls.append({
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                                "url": abs_url,
+                                "reason": "robots-disallow",
+                                "from": url,
+                            })
+                            continue
+                        if not self.match_filters(abs_url):
+                            self.skipped_urls.append({
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                                "url": abs_url,
+                                "reason": "filter-exclude",
+                                "from": url,
+                            })
+                            continue
+
+                        if self.is_asset(abs_url):
+                            if abs_url not in self.visited_assets:
+                                discovered.append(abs_url)
+                                out_links.append(abs_url)
+                        elif is_probably_html_url(abs_url):
+                            if abs_url not in self.visited_pages and depth + 1 <= self.cfg.depth:
+                                q.append((abs_url, depth + 1))
+                                # Pre-register mapping to future local file path
+                                self.url_to_local[abs_url] = self.url_to_page_path(abs_url)
+                                self.log(f"      enqueue {abs_url} (depth {depth + 1})")
+                            out_links.append(abs_url)
+                            # Record referer and depth info
+                            info = self.url_info.setdefault(abs_url, {"referers": set(), "depth": depth + 1})
+                            try:
+                                info["referers"].add(url)  # type: ignore
+                                info["depth"] = min(int(info["depth"]), depth + 1)  # type: ignore
+                            except Exception:
+                                pass
+
+                    # Save outbound link graph for this page URL
+                    if out_links:
+                        with self._lock:
+                            self.page_out_links[url] = sorted(set(out_links))
+
+                    # Download assets discovered on this page
+                    for asset_url in discovered:
+                        self._submit_asset_download(asset_url, depth)
+
+                    # Rewrite links in HTML to point to local mirrored targets (files)
+                    rewritten_html = self.rewrite_links_in_html(html_text, local_page_path, links, current_page_url=url)
+                    # Always write the rewritten HTML; idempotent if unchanged
+                    self.save_page_html(local_page_path, rewritten_html.encode('utf-8'))
+                    # Log and maybe update the index after asset handling
+                    self._write_event_log(path=local_page_path, kind="page", action=("resume" if local_page_path.exists() and not self.cfg.force else "download"), source_url=url)
+                    self._maybe_update_index()
+
+                else:
+                    # Asset (non-HTML)
+                    self._submit_asset_download(url, depth)
+
+                # Respect robots crawl-delay if provided (for page fetches)
+                time.sleep(self.crawl_delay_effective)
+
+                # Stop if max pages reached
+                if self.cfg.max_pages is not None and len(self.visited_pages) >= self.cfg.max_pages:
+                    break
+
+                # Continue loop; asset downloads run in parallel and will flush index periodically
+
+        # Context manager waits for all futures to finish
+        self._executor = None
+
+    def _submit_asset_download(self, asset_url: str, depth: int) -> None:
+        if self._executor is None:
+            # Fallback: run synchronously
+            self._download_asset(asset_url, depth)
+            return
+        fut = self._executor.submit(self._download_asset, asset_url, depth)
+        self._futures.append(fut)
+
+    def _download_asset(self, url: str, depth: int) -> None:
+        try:
+            local_asset_path = self.url_to_asset_path(url)
+            with self._lock:
+                self.url_to_local[url] = local_asset_path
+                already = local_asset_path.exists() and not self.cfg.force
+                if already:
+                    self.visited_assets.add(url)
+            if local_asset_path.exists() and not self.cfg.force:
+                self.log(f"[{depth}] ASSET  {url} -> {local_asset_path} (resume)")
+            else:
+                data, _ct, headers, status, final_url = self.fetch_url(url)
+                if data is None:
+                    return
+                self.save_file(local_asset_path, data)
+                with self._lock:
+                    self.url_headers[url] = headers
+                    self.url_fetched_at[url] = datetime.now(timezone.utc).isoformat()
+                    if status is not None:
+                        self.url_status[url] = status
+                    if final_url:
+                        self.url_final[url] = final_url
+                    self.visited_assets.add(url)
+                self.log(f"[{depth}] ASSET  {url} -> {local_asset_path}")
+            # Log and maybe update the index after asset handling
+            with self._lock:
+                self._write_event_log(path=local_asset_path, kind="asset", action=("resume" if local_asset_path.exists() and not self.cfg.force else "download"), source_url=url)
+                self._maybe_update_index()
+            time.sleep(self.crawl_delay_effective)
+        except Exception as e:
+            with self._lock:
+                self.crawl_errors.append({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "url": url,
+                    "stage": "asset-download",
+                    "error": str(e),
+                })
+
+    # MkDocs config writing removed from raw mirroring script
+
+
+# ----------------------------
+# CLI
+# ----------------------------
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="General-purpose website mirroring tool with intelligent link rewriting",
+        epilog="Examples:\n"
+               "  mirror-site --website-url https://docs.example.com/ --target-folder ./mirror --same-domain\n"
+               "  mirror-site --website-url https://site.com/page.html --target-folder ./page --link-depth 0\n"
+               "  mirror-site --website-url https://site.com/ --target-folder ./site --include '/docs/' --max-pages 500",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument("--website-url", required=True, help="Root website URL to mirror (e.g., https://example.com/)")
+    p.add_argument("--link-depth", type=int, default=2, help="Max crawl depth (0 = only the start page, default: 2)")
+    p.add_argument("--target-folder", required=True, help="Target folder to place the mirrored content")
+    p.add_argument("--same-domain", action="store_true", help="Restrict crawling to the same domain as website-url")
+    p.add_argument("--delay-seconds", type=float, default=0.5, help="Delay between requests to be polite")
+    p.add_argument("--timeout", type=int, default=60, help="HTTP timeout in seconds")
+    p.add_argument("--user-agent", default=DEFAULT_USER_AGENT, help="User-Agent header to use for requests")
+    p.add_argument("--silent", action="store_true", help="Suppress progress output")
+    p.add_argument("--re-download-all", action="store_true", dest="re_download_all", help="Re-download all files, do not resume from existing")
+    p.add_argument("--index-json", default="_mirror_index.json", help="Relative path (under target) for JSON index file")
+    p.add_argument("--index-md", default="_mirror_index.md", help="Relative path (under target) for Markdown index file")
+    p.add_argument("--index-log", default="_mirror_index.log", help="Relative path (under target) for newline-delimited JSON event log")
+    p.add_argument("--index-interval-files", type=int, default=50, help="Write full index after this many processed files (0 to disable file-count trigger)")
+    p.add_argument("--index-interval-seconds", type=float, default=30.0, help="Write full index if this many seconds passed since last write (0 to disable time trigger)")
+    p.add_argument("--no-hash", action="store_true", help="Do not compute SHA256 for files when building the index (faster)")
+    p.add_argument("--post-process", action="store_true", help="After crawl, re-scan HTML and rewrite absolute same-domain links to relative local paths")
+    p.add_argument("--allow-all-asset-types", action="store_true", help="Treat any non-HTML URL as an asset (do not limit to known extensions)")
+    p.add_argument("--include", help="Only include URLs whose path contains this substring", default=None)
+    p.add_argument("--exclude", help="Exclude URLs whose path contains this substring", default=None)
+    p.add_argument("--max-pages", type=int, default=None, help="Maximum number of HTML pages to fetch (None = no limit)")
+    p.add_argument("--concurrency", type=int, default=4, help="Number of parallel asset downloads")
+    args = p.parse_args(argv)
+    # Keep reference to parser for downstream help printing on validation errors
+    setattr(args, "_parser", p)
+    return args
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_args(argv)
+
+    # Basic argument validation and help display
+    def die_with_help(msg: str) -> int:
+        try:
+            print(f"ERROR: {msg}\n", file=sys.stderr)
+            if hasattr(args, "_parser"):
+                args._parser.print_help(sys.stderr)
+        except Exception:
+            pass
+        return 2
+
+    # Validate website URL
+    if not (isinstance(args.website_url, str) and args.website_url.startswith(("http://", "https://"))):
+        return die_with_help("--website-url must start with http:// or https://")
+    # Validate numeric ranges
+    if args.link_depth is not None and int(args.link_depth) < 0:
+        return die_with_help("--link-depth must be >= 0")
+    if float(args.delay_seconds) < 0:
+        return die_with_help("--delay-seconds must be >= 0")
+    if int(args.timeout) <= 0:
+        return die_with_help("--timeout must be > 0")
+    if args.max_pages is not None and int(args.max_pages) <= 0:
+        return die_with_help("--max-pages must be > 0 when provided")
+
+    base_url = normalize_base_url(args.website_url)
+    target_folder = Path(args.target_folder).resolve()
+    target_folder.mkdir(parents=True, exist_ok=True)
+    # Check that target folder is writable
+    try:
+        test_path = target_folder / ".mirror_write_test.tmp"
+        with test_path.open("w", encoding="utf-8") as f:
+            f.write("ok")
+        test_path.unlink(missing_ok=True)
+    except Exception as e:
+        return die_with_help(f"Target folder is not writable: {e}")
+
+    cfg = MirrorConfig(
+        base_url=base_url,
+        target_folder=target_folder,
+        depth=args.link_depth,
+        same_domain_only=bool(args.same_domain),
+        delay_seconds=float(args.delay_seconds),
+        timeout=int(args.timeout),
+        user_agent=str(args.user_agent),
+        silent=bool(args.silent),
+        force=bool(args.re_download_all),
+        index_json=str(args.index_json),
+        index_md=str(args.index_md),
+        no_hash=bool(args.no_hash),
+        index_log=str(args.index_log),
+        index_interval_files=int(args.index_interval_files),
+        index_interval_seconds=float(args.index_interval_seconds),
+        allow_all_assets=bool(getattr(args, "allow_all_asset_types", args.allow_all_asset_types if hasattr(args, 'allow_all_asset_types') else False)),
+        include=args.include,
+        exclude=args.exclude,
+        max_pages=(None if args.max_pages is None else int(args.max_pages)),
+        concurrency=int(args.concurrency),
+    )
+
+    mirror = SiteMirror(cfg)
+    if not cfg.silent:
+        mode = "re-download-all" if cfg.force else "resume"
+        print(f"Starting raw mirror: {cfg.base_url} -> {cfg.target_folder} (depth={cfg.depth}, mode={mode})")
+    # Seed from existing index if present
+    mirror.seed_from_existing_index()
+    mirror.crawl()
+
+    # Optional post-processing phase
+    if getattr(args, "post_process", False):
+        if not cfg.silent:
+            print("Post-processing HTML to normalize links...")
+        mirror.post_process_html()
+
+    if not cfg.silent:
+        print("Mirror completed.")
+        print(f"Mirror folder: {target_folder}")
+        print("Building index...")
+
+    # Build an index of all files and folders in the mirror
+    def sha256sum(p: Path) -> Optional[str]:
+        if args.no_hash:
+            return None
+        h = hashlib.sha256()
+        try:
+            with p.open('rb') as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                    h.update(chunk)
+            return h.hexdigest()
+        except Exception:
+            return None
+
+    # Map local absolute paths to source URLs for items discovered in this run
+    local_to_url: Dict[Path, str] = {}
+    for url, local_path in mirror.url_to_local.items():
+        try:
+            local_to_url[local_path.resolve()] = url
+        except Exception:
+            pass
+
+    index_entries: List[Dict[str, object]] = []
+    # First collect files
+    for root, dirs, files in os.walk(target_folder):
+        root_path = Path(root)
+        for name in files:
+            fp = root_path / name
+            if fp.name in {args.index_json, args.index_md} and fp.parent == target_folder:
+                # Skip previous index files when regenerating
+                continue
+            stat = fp.stat()
+            rel = fp.relative_to(target_folder).as_posix()
+            entry: Dict[str, object] = {
+                "path": rel,
+                "type": "file",
+                "size": stat.st_size,
+                "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "mime": mimetypes.guess_type(fp.name)[0] or "application/octet-stream",
+                "target_abs_path": str(fp.resolve()),
+                "target_root": str(target_folder.resolve()),
+            }
+            abs_fp = fp.resolve()
+            if not args.no_hash:
+                entry["sha256"] = sha256sum(fp)
+            if abs_fp in local_to_url:
+                src = local_to_url[abs_fp]
+                entry["source_url"] = src
+                # Attach original headers-derived metadata if available
+                h = mirror.url_headers.get(src, {})
+                if h:
+                    if "etag" in h:
+                        entry["original_etag"] = h.get("etag")
+                    if "content-md5" in h:
+                        entry["original_checksum_header"] = h.get("content-md5")
+                    if "last-modified" in h:
+                        try:
+                            entry["original_last_modified"] = parsedate_to_datetime(h.get("last-modified", "")).astimezone(timezone.utc).isoformat()
+                        except Exception:
+                            entry["original_last_modified"] = h.get("last-modified")
+                    if "content-length" in h:
+                        try:
+                            entry["original_content_length"] = int(h.get("content-length", "0"))
+                        except Exception:
+                            entry["original_content_length"] = h.get("content-length")
+                    if "content-type" in h:
+                        entry["original_content_type"] = h.get("content-type")
+                if src in mirror.url_fetched_at:
+                    entry["downloaded_at"] = mirror.url_fetched_at[src]
+                if src in mirror.url_status:
+                    entry["http_status"] = mirror.url_status[src]
+                if src in mirror.url_final:
+                    entry["final_url"] = mirror.url_final[src]
+            index_entries.append(entry)
+
+    # Then collect directories with aggregated info
+    # Precompute size sum and item count per directory
+    dir_info: Dict[Path, Dict[str, int]] = {}
+    for e in index_entries:
+        p = target_folder / e["path"]  # file path
+        parent = p.parent
+        while parent.is_dir() and parent != target_folder.parent:
+            d = dir_info.setdefault(parent, {"size": 0, "items": 0})
+            d["size"] += int(e["size"])  # type: ignore
+            d["items"] += 1
+            if parent == target_folder:
+                break
+            parent = parent.parent
+
+    for dpath, info in dir_info.items():
+        rel = dpath.relative_to(target_folder).as_posix() if dpath != target_folder else "."
+        index_entries.append({
+            "path": rel,
+            "type": "dir",
+            "size": info["size"],
+            "items": info["items"],
+        })
+
+    # Construct URL-centric map for fetched/seen URLs for final payload
+    urls_map: Dict[str, Dict[str, object]] = {}
+    for url, local_path in mirror.url_to_local.items():
+        info = mirror.url_info.get(url, {})
+        referers: List[str] = []
+        try:
+            r = info.get("referers")  # type: ignore
+            if isinstance(r, set):
+                referers = sorted(r)
+            elif isinstance(r, list):
+                referers = sorted(set(r))
+        except Exception:
+            referers = []
+        depth_val = None
+        try:
+            depth_val = int(info.get("depth"))  # type: ignore
+        except Exception:
+            depth_val = None
+        rec: Dict[str, object] = {
+            "url": url,
+            "final_url": mirror.url_final.get(url, url),
+            "http_status": mirror.url_status.get(url),
+            "headers": mirror.url_headers.get(url, {}),
+            "downloaded_at": mirror.url_fetched_at.get(url),
+            "local_path": str(local_path.relative_to(target_folder)),
+            "kind": "asset" if is_asset_url(url) else ("page" if is_probably_html_url(url) else "unknown"),
+            "referers": referers,
+            "depth": depth_val,
+        }
+        urls_map[url] = rec
+
+    # Write JSON index (object with meta + items + graph)
+    json_path = target_folder / args.index_json
+    # Build reverse graph (in_edges) for final payload as well
+    graph_out_final = mirror.page_out_links
+    graph_in_final: Dict[str, List[str]] = {}
+    for src_url, outs in graph_out_final.items():
+        for dst in outs:
+            graph_in_final.setdefault(dst, []).append(src_url)
+    for k in list(graph_in_final.keys()):
+        graph_in_final[k] = sorted(set(graph_in_final[k]))
+
+    payload = {
+        "meta": {
+            "base_url": cfg.base_url,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "target_root": str(target_folder.resolve()),
+            "items_count": len(index_entries),
+            "tool": "mirror_site.py",
+            "tool_version": "1",
+            "schema_version": 1,
+            "args": {
+                "link_depth": args.link_depth,
+                "same_domain": bool(args.same_domain),
+                "delay_seconds": float(args.delay_seconds),
+                "timeout": int(args.timeout),
+                "user_agent": str(args.user_agent),
+                "post_process": bool(getattr(args, "post_process", False)),
+                "re_download_all": bool(args.re_download_all),
+                "concurrency": int(args.concurrency),
+            },
+        },
+        "items": sorted(index_entries, key=lambda x: (x["type"], x["path"])),
+        "graph": {"out_edges": graph_out_final, "in_edges": graph_in_final},
+        "urls": urls_map,
+    }
+    with json_path.open('w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    # Write Markdown index (human-friendly) - only at the end
+    md_lines: List[str] = []
+    md_lines.append(f"# Mirror Index\n")
+    md_lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}\n")
+    total_files = sum(1 for e in index_entries if e["type"] == "file")
+    total_dirs = sum(1 for e in index_entries if e["type"] == "dir")
+    total_size = sum(int(e.get("size", 0)) for e in index_entries if e["type"] == "file")
+    md_lines.append(f"- Files: {total_files}\n")
+    md_lines.append(f"- Dirs: {total_dirs}\n")
+    md_lines.append(f"- Bytes: {total_size}\n\n")
+    md_lines.append("## Entries\n")
+    md_lines.append("Path | Type | Size | Modified | Mime | Source URL | Original Last-Modified | Downloaded At | ETag | Content-MD5 | SHA256 | Target Abs Path")
+    md_lines.append("--- | --- | ---:| --- | --- | --- | --- | --- | --- | --- | --- | ---")
+    for e in sorted(index_entries, key=lambda x: (x["type"], x["path"])):
+        if e["type"] == "file":
+            md_lines.append(
+                f"{e['path']} | file | {e['size']} | {e['mtime']} | {e['mime']} | {e.get('source_url','')} | {e.get('original_last_modified','')} | {e.get('downloaded_at','')} | {e.get('original_etag','')} | {e.get('original_checksum_header','')} | {e.get('sha256','')} | {e.get('target_abs_path','')}"
+            )
+        else:
+            md_lines.append(
+                f"{e['path']} | dir | {e['size']} |  |  |  |  |  |  |  |  | "
+            )
+    md_path = target_folder / args.index_md
+    md_path.write_text("\n".join(md_lines), encoding='utf-8')
+
+    if not cfg.silent:
+        print(f"Wrote index files: {json_path.name}, {md_path.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
