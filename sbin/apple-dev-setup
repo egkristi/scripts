@@ -502,6 +502,9 @@ class AppleDeveloperSetup:
             'appleId': user_info['appleId'],
             'developerName': user_info['developerName'],
             'countryCode': user_info['countryCode'],
+            'privateKeyPath': str(self.private_key_file),
+            'csrPath': str(self.csr_file),
+            'credentialsDirectory': str(self.apple_dev_dir),
         })
         
         # Remove progress tracking from final config
@@ -517,8 +520,7 @@ class AppleDeveloperSetup:
             # Create a clean copy for final save, removing temporary fields
             clean_config = config.copy()
             clean_config.pop('_progress', None)
-            clean_config.pop('csrPath', None)
-            clean_config.pop('privateKeyPath', None)
+            # Keep csrPath and privateKeyPath in final config for other tools to use
             
             with open(self.config_file, 'w') as f:
                 json.dump(clean_config, f, indent=2)
@@ -543,6 +545,9 @@ class AppleDeveloperSetup:
         table.add_row("Team ID", config['teamId'])
         table.add_row("Identity", config['identity'])
         table.add_row("Config File", str(self.config_file))
+        table.add_row("Private Key", config.get('privateKeyPath', 'Not set'))
+        table.add_row("CSR File", config.get('csrPath', 'Not set'))
+        table.add_row("Credentials Dir", config.get('credentialsDirectory', 'Not set'))
         table.add_row("Status", "✅ Ready for code signing")
         
         console.print(table)

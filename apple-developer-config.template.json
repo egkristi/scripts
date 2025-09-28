@@ -20,9 +20,15 @@
     "com.apple.security.cs.allow-unsigned-executable-memory": true,
     "com.apple.security.cs.disable-library-validation": true
   },
+  "privateKeyPath": "",
+  "csrPath": "",
+  "credentialsDirectory": "",
   "example": {
     "identity": "Developer ID Application: John Doe (ABC123DEF4)",
     "teamId": "ABC123DEF4",
-    "appleId": "john.doe@example.com"
+    "appleId": "john.doe@example.com",
+    "privateKeyPath": "/Users/username/.apple-developer/private_key.pem",
+    "csrPath": "/Users/username/.apple-developer/CertificateSigningRequest.certSigningRequest",
+    "credentialsDirectory": "/Users/username/.apple-developer"
   }
 }
