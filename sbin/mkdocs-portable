@@ -502,7 +502,11 @@ def create_electron_files(target_dir: Path, site_name: str, version: str = "1.0.
 {mac_config}
     }},
     "win": {{
-      "target": "nsis"
+      "target": {{
+        "target": "nsis",
+        "arch": ["arm64"]
+      }},
+      "artifactName": "{site_name}-${{version}}-${{arch}}.exe"
     }},
     "linux": {{
       "target": "AppImage"
