@@ -51,8 +51,13 @@ class AppleDeveloperSetup:
         self.script_dir = Path(__file__).parent.parent
         self.config_file = self.script_dir / ".apple-developer-config.json"
         self.template_file = self.script_dir / "apple-developer-config.template.json"
-        self.csr_file = Path.home() / "Desktop" / "CertificateSigningRequest.certSigningRequest"
-        self.private_key_file = Path.home() / "Desktop" / "private_key.pem"
+        
+        # Create secure directory for Apple Developer credentials (similar to .ssh)
+        self.apple_dev_dir = Path.home() / ".apple-developer"
+        self.apple_dev_dir.mkdir(mode=0o700, exist_ok=True)  # Only user can read/write/execute
+        
+        self.csr_file = self.apple_dev_dir / "CertificateSigningRequest.certSigningRequest"
+        self.private_key_file = self.apple_dev_dir / "private_key.pem"
         
     def welcome(self):
         """Display welcome message and overview."""
@@ -66,7 +71,10 @@ class AppleDeveloperSetup:
             "[yellow]Prerequisites:[/yellow]\n"
             "• Apple Developer Account ($99/year)\n"
             "• macOS with Keychain Access\n"
-            "• Internet connection",
+            "• Internet connection\n\n"
+            "[blue]Security:[/blue]\n"
+            f"• Private keys stored securely in {self.apple_dev_dir}\n"
+            "• Files protected with 600 permissions (user-only access)",
             title="🍎 Apple Developer Setup"
         ))
         
@@ -297,7 +305,7 @@ class AppleDeveloperSetup:
             subject
         ).sign(private_key, hashes.SHA256())
         
-        # Save private key
+        # Save private key with secure permissions
         private_key_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
@@ -306,11 +314,15 @@ class AppleDeveloperSetup:
         
         with open(self.private_key_file, 'wb') as f:
             f.write(private_key_pem)
+        # Set secure permissions (only user can read/write)
+        self.private_key_file.chmod(0o600)
             
-        # Save CSR
+        # Save CSR with secure permissions
         csr_pem = csr.public_bytes(serialization.Encoding.PEM)
         with open(self.csr_file, 'wb') as f:
             f.write(csr_pem)
+        # Set secure permissions (only user can read/write)
+        self.csr_file.chmod(0o600)
             
         console.print(f"✅ CSR saved to: {self.csr_file}")
         console.print(f"✅ Private key saved to: {self.private_key_file}")
@@ -455,9 +467,24 @@ class AppleDeveloperSetup:
             
             if identity in result.stdout:
                 console.print("✅ Certificate is valid for code signing")
+                console.print("✅ Private key is properly associated")
+                console.print("✅ Ready for mkdocs-portable code signing")
                 return True
             else:
                 console.print("❌ Certificate not found in code signing identities")
+                console.print("❌ This means the private key is missing or not associated")
+                
+                # Additional diagnostic information
+                cert_check = subprocess.run([
+                    "security", "find-certificate", "-c", identity, "login.keychain"
+                ], capture_output=True, text=True)
+                
+                if cert_check.returncode == 0:
+                    console.print("ℹ️  Certificate exists in keychain but lacks private key")
+                    console.print("ℹ️  This happens when certificate was not created with our CSR")
+                else:
+                    console.print("ℹ️  Certificate not found in keychain at all")
+                
                 return False
                 
         except subprocess.CalledProcessError as e:
@@ -532,8 +559,13 @@ class AppleDeveloperSetup:
         ))
         
     def cleanup_temp_files(self):
-        """Clean up temporary files."""
-        if Confirm.ask("\nRemove temporary CSR and private key files from Desktop?", default=True):
+        """Clean up temporary CSR and private key files."""
+        console.print("\n[bold]Cleanup[/bold]")
+        
+        console.print(f"[blue]Secure files stored in:[/blue] {self.apple_dev_dir}")
+        console.print("[dim]Files are kept for future certificate renewals and troubleshooting[/dim]")
+        
+        if Confirm.ask("Remove CSR and private key files? (Not recommended - keep for renewals)", default=False):
             try:
                 if self.csr_file.exists():
                     self.csr_file.unlink()
@@ -543,8 +575,15 @@ class AppleDeveloperSetup:
                     self.private_key_file.unlink()
                     console.print(f"✅ Removed: {self.private_key_file}")
                     
+                # Remove directory if empty
+                if self.apple_dev_dir.exists() and not any(self.apple_dev_dir.iterdir()):
+                    self.apple_dev_dir.rmdir()
+                    console.print(f"✅ Removed empty directory: {self.apple_dev_dir}")
+                    
             except OSError as e:
-                console.print(f"⚠️  Could not remove temporary files: {e}")
+                console.print(f"⚠️  Could not remove files: {e}")
+        else:
+            console.print("✅ Keeping secure files for future use")
                 
     def run(self, force_enable: bool = False):
         """Run the complete setup process."""
@@ -624,9 +663,14 @@ class AppleDeveloperSetup:
                     f"   • Use CSR: [cyan]{self.csr_file}[/cyan]\n"
                     f"   • Download and install new certificate\n"
                     f"3. Re-run this script\n\n"
-                    f"[red]Important:[/red] The certificate must be created with the CSR from this script!",
+                    f"[red]Important:[/red] The certificate must be created with the CSR from this script!\n"
+                    f"[blue]Only then will mkdocs-portable have working code signing by default.[/blue]",
                     title="🔧 Fix Certificate Issue"
                 ))
+                
+                # Offer to open Keychain Access for easier certificate management
+                if Confirm.ask("Open Keychain Access now to delete the existing certificate?", default=False):
+                    subprocess.run(["open", "/Applications/Utilities/Keychain Access.app"], check=False)
                 sys.exit(1)
             
         # Create and save configuration (only enable if everything is working)
