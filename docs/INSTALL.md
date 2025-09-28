@@ -2,12 +2,14 @@
 
 ## Quick Start (Recommended)
 
-**Just want to get started?** Run this one command:
+**Just want to get started?** All scripts use uv's inline dependencies feature (PEP 723) for self-contained execution - no manual dependency installation required!
+
+Run this one command:
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/egkristi/shell-scripts/refs/heads/main/init.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/egkristi/scripts/refs/heads/main/init.sh)"
 ```
 
-This will automatically set up everything you need. Continue reading for manual installation or troubleshooting.
+This will automatically set up everything you need. The scripts are self-contained and manage their own dependencies automatically. Continue reading for manual installation or troubleshooting.
 
 ---
 

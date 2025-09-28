@@ -1,6 +1,6 @@
 # Converter: Raw Mirror to MkDocs
 
-This document describes the converter script at `sbin/convert-to-mkdocs`, which transforms a raw website mirror (produced by `sbin/mirror-site`) into a MkDocs-ready project.
+This document describes the converter script at `sbin/convert-to-mkdocs`, which uses uv's inline dependencies feature (PEP 723) for self-contained execution. It transforms a raw website mirror (produced by `sbin/mirror-site`) into a MkDocs-ready project.
 
 ## What it does
 

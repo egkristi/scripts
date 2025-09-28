@@ -1,6 +1,6 @@
 # Portable Documentation Builder
 
-This document describes how to use the `sbin/mkdocs-portable` script to create portable, self-contained documentation sites and desktop applications from any MkDocs-compatible documentation.
+This document describes how to use the `sbin/mkdocs-portable` script, which uses uv's inline dependencies feature (PEP 723) for self-contained execution. It creates portable, self-contained documentation sites and desktop applications from any MkDocs-compatible documentation.
 
 ## Overview
 

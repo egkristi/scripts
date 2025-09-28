@@ -1,6 +1,6 @@
 # Website Mirroring Toolkit
 
-This repository contains a Python-based website mirroring script (`sbin/mirror-site`) that downloads a site to a local folder, rewrites links to local files, and generates a rich JSON/Markdown index capturing metadata, link graphs, and run context.
+This repository contains a Python-based website mirroring script (`sbin/mirror-site`) that uses uv's inline dependencies feature (PEP 723) for self-contained execution. It downloads a site to a local folder, rewrites links to local files, and generates a rich JSON/Markdown index capturing metadata, link graphs, and run context.
 
 ## Features
 
@@ -20,15 +20,20 @@ This repository contains a Python-based website mirroring script (`sbin/mirror-s
 
 ### Prerequisites
 
-- Python 3.9+
-- [uv](https://github.com/astral-sh/uv) (recommended) or a Python virtualenv
+- Python 3.8+
+- [uv](https://github.com/astral-sh/uv) package manager
 
-Dependencies are managed via `pyproject.toml`. Optional dependency: `chardet` for better charset detection.
+**No manual dependency installation required!** The script uses uv's inline dependencies feature (PEP 723) to automatically manage its dependencies (`chardet` for charset detection) in an isolated environment.
 
 ### Install
 
-```
-uv sync
+No installation required! The script is self-contained with inline dependencies. Simply ensure you have `uv` installed:
+
+```bash
+# Install uv (one-time setup)
+curl -LsSf https://astral.sh/uv/install.sh | sh  # Unix/Mac
+# or
+irm https://astral.sh/uv/install.ps1 | iex       # Windows
 ```
 
 ### Basic Usage

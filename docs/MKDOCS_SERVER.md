@@ -1,6 +1,6 @@
 # MkDocs Server Helper
 
-This document describes the helper script at `sbin/mkdocs-server`, a robust wrapper for running a local MkDocs development server.
+This document describes the helper script at `sbin/mkdocs-server`, which uses uv's inline dependencies feature (PEP 723) for self-contained execution. It's a robust wrapper for running a local MkDocs development server.
 
 ## Overview
 
