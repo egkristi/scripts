@@ -140,7 +140,7 @@ target_folder/
 **Best for:** Developers, technical users, customization
 
 **Steps:**
-1. Run the build script: `uv run scripts/build_portable_docs.py`
+1. Run the build script: `mkdocs-portable --source-folder SOURCE --target-folder TARGET`
 2. Distribute the entire output folder
 3. Users run the appropriate launcher script:
    - Windows: `run_windows.bat` or `run_windows.ps1`
@@ -161,7 +161,7 @@ target_folder/
 **Best for:** End users, students, wide distribution
 
 **Steps:**
-1. Build applications: `uv run scripts/build_portable_docs.py --build-electron`
+1. Build applications: `mkdocs-portable --source-folder SOURCE --target-folder TARGET --build-electron`
 2. Distribute the built applications from `dist/` folder
 3. Users simply download and run:
    - Windows: Run the `.exe` installer
@@ -183,7 +183,7 @@ target_folder/
 **Best for:** Course instructors, customization, CI/CD
 
 **Steps:**
-1. Create with Electron files: `uv run scripts/build_portable_docs.py --with-electron`
+1. Create with Electron files: `mkdocs-portable --source-folder SOURCE --target-folder TARGET --with-electron`
 2. Distribute entire folder with build scripts
 3. Recipients can:
    - Run web server version immediately
@@ -196,7 +196,7 @@ target_folder/
 
 ```bash
 # Build all platforms automatically
-uv run scripts/build_portable_docs.py --build-electron
+mkdocs-portable --source-folder SOURCE --target-folder TARGET --build-electron
 
 # This will:
 # 1. Create all necessary files
@@ -356,7 +356,7 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Build portable docs
-        run: uv run scripts/build_portable_docs.py --build-electron
+        run: mkdocs-portable --source-folder studyguide --target-folder portable_docs --build-electron
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
@@ -445,7 +445,7 @@ The script creates version 1.0.0 by default. To update:
 
 ## Conclusion
 
-The `build_portable_docs.py` script provides a comprehensive solution for distributing the INF100 study guide in multiple formats. Choose the distribution method that best fits your audience:
+The `mkdocs-portable` script provides a comprehensive solution for distributing documentation in multiple formats. Choose the distribution method that best fits your audience:
 
 - **Desktop applications** for students and end users
 - **Web server version** for developers and technical users  
