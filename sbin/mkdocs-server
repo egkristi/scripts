@@ -18,25 +18,25 @@ Features:
 - Works with any MkDocs project structure
 
 Usage:
-  mkdocs-serve --project-root PROJECT_DIR [options]
+  mkdocs-server --project-root PROJECT_DIR [options]
 
 Examples:
   # Serve a converted mirror site
-  mkdocs-serve --project-root ./mkdocs-site --install-deps
+  mkdocs-server --project-root ./mkdocs-site --install-deps
 
   # Serve with custom host and port
-  mkdocs-serve --project-root ./docs \
+  mkdocs-server --project-root ./docs \
                --host 0.0.0.0 \
                --port 8080 \
                --install-deps
 
   # Serve with custom docs directory
-  mkdocs-serve --project-root ./my-project \
+  mkdocs-server --project-root ./my-project \
                --docs-subdir content \
                --theme readthedocs
 
   # Silent mode for automation
-  mkdocs-serve --project-root ./site \
+  mkdocs-server --project-root ./site \
                --install-deps \
                --silent
 
@@ -128,9 +128,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Serve a MkDocs site with automatic setup and dependency management",
         epilog="Examples:\n"
-               "  mkdocs-serve --project-root ./mkdocs-site --install-deps\n"
-               "  mkdocs-serve --project-root ./docs --host 0.0.0.0 --port 8080\n"
-               "  mkdocs-serve --project-root ./site --docs-subdir content --theme readthedocs",
+               "  mkdocs-server --project-root ./mkdocs-site --install-deps\n"
+               "  mkdocs-server --project-root ./docs --host 0.0.0.0 --port 8080\n"
+               "  mkdocs-server --project-root ./site --docs-subdir content --theme readthedocs",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--project-root", required=True, 

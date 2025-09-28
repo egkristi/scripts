@@ -89,7 +89,7 @@ convert-to-mkdocs \
   --output-folder INF100_H25_DOCS \
   --write-config
 
-mkdocs-serve --project-root INF100_H25_DOCS --install-deps
+mkdocs-server --project-root INF100_H25_DOCS --install-deps
 ```
 
 ## Notes & tips

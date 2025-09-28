@@ -1,10 +1,10 @@
 # MkDocs Server Helper
 
-This document describes the helper script at `sbin/mkdocs-serve`, a robust wrapper for running a local MkDocs development server.
+This document describes the helper script at `sbin/mkdocs-server`, a robust wrapper for running a local MkDocs development server.
 
 ## Overview
 
-`mkdocs-serve` helps you:
+`mkdocs-server` helps you:
 
 - Ensure MkDocs is installed (optionally auto-install via `uv add`).
 - Ensure a valid MkDocs project structure exists (create a minimal `mkdocs.yml` and `docs/index.md` if necessary).
@@ -15,7 +15,7 @@ It is intended to work hand-in-hand with the converter at `sbin/convert-to-mkdoc
 ## Usage
 
 ```
-mkdocs-serve \
+mkdocs-server \
   --project-root PROJECT_DIR \
   [--docs-subdir docs] \
   [--host 127.0.0.1] \
@@ -61,13 +61,13 @@ mkdocs-serve \
 
 - **Serve a converted mirror** (after running `sbin/convert-to-mkdocs`):
   ```
-  mkdocs-serve --project-root MKDOCS_PROJECT --install-deps
+  mkdocs-server --project-root MKDOCS_PROJECT --install-deps
   ```
   Then open `http://127.0.0.1:8000` in your browser.
 
 - **Serve a generic MkDocs project with custom host/port**:
   ```
-  mkdocs-serve \
+  mkdocs-server \
     --project-root my_mkdocs_project \
     --host 0.0.0.0 \
     --port 8080 \
@@ -96,7 +96,7 @@ mkdocs-serve \
 
 ```mermaid
 flowchart LR
-    A[mkdocs-serve] --> B{mkdocs installed?}
+    A[mkdocs-server] --> B{mkdocs installed?}
     B -- no & install-deps --> C[uv add mkdocs mkdocs-material]
     B -- yes --> D
     C --> D[ensure mkdocs.yml & docs/index.md]

@@ -106,7 +106,7 @@ convert-to-mkdocs --mirror-folder ./mirror \
 
 **Note:** Works perfectly with mirror-site output that includes metadata!
 
-## mkdocs-serve
+## mkdocs-server
 Robust MkDocs development server wrapper with automatic setup.
 - **Language:** Python (uses uv for dependency management)
 - **Dependencies:** None (optionally installs mkdocs and mkdocs-material via uv)
@@ -119,28 +119,28 @@ Robust MkDocs development server wrapper with automatic setup.
 - Flexible host and port configuration
 - Works with any MkDocs project structure
 
-**Usage:** `mkdocs-serve --project-root PROJECT_DIR [options]`
+**Usage:** `mkdocs-server --project-root PROJECT_DIR [options]`
 
 **Examples:**
 ```bash
 # Serve a converted mirror site
-mkdocs-serve --project-root ./mkdocs-site --install-deps
+mkdocs-server --project-root ./mkdocs-site --install-deps
 
 # Serve with custom host and port
-mkdocs-serve --project-root ./docs \
-             --host 0.0.0.0 \
-             --port 8080 \
-             --install-deps
+mkdocs-server --project-root ./docs \
+              --host 0.0.0.0 \
+              --port 8080 \
+              --install-deps
 
 # Serve with custom docs directory
-mkdocs-serve --project-root ./my-project \
-             --docs-subdir content \
-             --theme readthedocs
+mkdocs-server --project-root ./my-project \
+              --docs-subdir content \
+              --theme readthedocs
 
 # Silent mode for automation
-mkdocs-serve --project-root ./site \
-             --install-deps \
-             --silent
+mkdocs-server --project-root ./site \
+              --install-deps \
+              --silent
 ```
 
 **Note:** Perfect companion to convert-to-mkdocs for serving converted website mirrors!
