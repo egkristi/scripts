@@ -108,6 +108,7 @@ class Config:
     base_url: Optional[str]
     silent: bool
     write_config: bool
+    with_portable: bool
 
 
 class Converter:
@@ -243,6 +244,224 @@ class Converter:
         yml.write_text("\n".join(nav_lines) + "\n", encoding='utf-8')
         self.log(f"Wrote mkdocs.yml -> {yml}")
 
+    def create_portable_components(self) -> None:
+        """Create portable components for the MkDocs site."""
+        if not self.cfg.with_portable:
+            return
+            
+        self.log("Creating portable components...")
+        
+        # Create pyproject.toml
+        self.create_pyproject_toml()
+        
+        # Create run scripts
+        self.create_run_scripts()
+        
+        # Create README
+        self.create_readme()
+        
+        # Create .gitignore
+        self.create_gitignore()
+
+    def create_pyproject_toml(self) -> None:
+        """Create pyproject.toml for uv dependency management."""
+        pyproject_path = self.cfg.output_folder / "pyproject.toml"
+        
+        content = '''[project]
+name = "mkdocs-site"
+version = "1.0.0"
+description = "Portable MkDocs documentation site"
+dependencies = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+]
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+'''
+        
+        pyproject_path.write_text(content, encoding='utf-8')
+        self.log(f"Created pyproject.toml -> {pyproject_path}")
+
+    def create_run_scripts(self) -> None:
+        """Create cross-platform run scripts."""
+        # Windows Batch script
+        bat_content = '''@echo off
+echo Setting up MkDocs environment...
+uv sync
+echo Starting MkDocs server...
+uv run mkdocs serve
+pause
+'''
+        bat_path = self.cfg.output_folder / "run_windows.bat"
+        bat_path.write_text(bat_content, encoding='utf-8')
+        self.log(f"Created run_windows.bat -> {bat_path}")
+
+        # Windows PowerShell script
+        ps1_content = '''Write-Host "Setting up MkDocs environment..." -ForegroundColor Green
+uv sync
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Failed to sync dependencies" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+Write-Host "Starting MkDocs server..." -ForegroundColor Green
+Write-Host "Open your browser to: http://localhost:8000" -ForegroundColor Yellow
+uv run mkdocs serve
+Read-Host "Press Enter to exit"
+'''
+        ps1_path = self.cfg.output_folder / "run_windows.ps1"
+        ps1_path.write_text(ps1_content, encoding='utf-8')
+        self.log(f"Created run_windows.ps1 -> {ps1_path}")
+
+        # Unix shell script
+        sh_content = '''#!/bin/bash
+echo "Setting up MkDocs environment..."
+uv sync
+if [ $? -ne 0 ]; then
+    echo "Failed to sync dependencies"
+    exit 1
+fi
+
+echo "Starting MkDocs server..."
+echo "Open your browser to: http://localhost:8000"
+uv run mkdocs serve
+'''
+        sh_path = self.cfg.output_folder / "run_unix.sh"
+        sh_path.write_text(sh_content, encoding='utf-8')
+        # Make executable
+        sh_path.chmod(0o755)
+        self.log(f"Created run_unix.sh -> {sh_path}")
+
+    def create_readme(self) -> None:
+        """Create README with usage instructions."""
+        readme_content = '''# Portable MkDocs Documentation
+
+This is a portable MkDocs documentation site that can be run on any system with Python and uv installed.
+
+## Prerequisites
+
+- Python 3.8 or higher
+- [uv](https://docs.astral.sh/uv/) package manager
+
+### Installing uv
+
+**Windows:**
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+**Mac/Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+## Running the Documentation
+
+### Windows
+- Double-click `run_windows.bat`, or
+- Run `run_windows.ps1` in PowerShell
+
+### Mac/Linux
+```bash
+./run_unix.sh
+```
+
+### Manual Setup
+If the run scripts don't work, you can set up manually:
+
+```bash
+# Install dependencies
+uv sync
+
+# Start the server
+uv run mkdocs serve
+```
+
+## Accessing the Documentation
+
+Once the server starts, open your browser to:
+**http://localhost:8000**
+
+The server will automatically reload when you make changes to the documentation files.
+
+## Project Structure
+
+- `docs/` - Documentation content (Markdown files)
+- `mkdocs.yml` - MkDocs configuration
+- `pyproject.toml` - Python dependencies
+- `run_*.{bat,ps1,sh}` - Platform-specific run scripts
+
+## Customization
+
+You can customize the site by editing:
+- `mkdocs.yml` - Site configuration and navigation
+- `docs/` - Add or modify documentation pages
+- `pyproject.toml` - Add additional Python dependencies if needed
+
+For more information about MkDocs, visit: https://www.mkdocs.org/
+'''
+        
+        readme_path = self.cfg.output_folder / "README.md"
+        readme_path.write_text(readme_content, encoding='utf-8')
+        self.log(f"Created README.md -> {readme_path}")
+
+    def create_gitignore(self) -> None:
+        """Create .gitignore for the portable site."""
+        gitignore_content = '''# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# MkDocs
+site/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+'''
+        
+        gitignore_path = self.cfg.output_folder / ".gitignore"
+        gitignore_path.write_text(gitignore_content, encoding='utf-8')
+        self.log(f"Created .gitignore -> {gitignore_path}")
+
     def compute_target_href(self, from_docs_md: Path, link_val: str) -> Optional[str]:
         # Resolve absolute URL against base_url if provided
         abs_url = link_val
@@ -348,6 +567,7 @@ class Converter:
         self.copy_assets()
         self.convert_pages()
         self.write_mkdocs_config()
+        self.create_portable_components()
         self.log("Conversion completed.")
 
 
@@ -356,8 +576,8 @@ def parse_args() -> argparse.Namespace:
         description="Convert raw website mirror into MkDocs-friendly structure",
         epilog="Examples:\n"
                "  convert-to-mkdocs --mirror-folder docs-mirror --output-folder mkdocs-site --write-config\n"
-               "  convert-to-mkdocs --mirror-folder ./mirror --output-folder ./site --base-url https://example.com/\n"
-               "  convert-to-mkdocs --mirror-folder site-mirror --output-folder my-docs --docs-subdir content",
+               "  convert-to-mkdocs --mirror-folder ./mirror --output-folder ./site --base-url https://example.com/ --with-portable\n"
+               "  convert-to-mkdocs --mirror-folder site-mirror --output-folder my-docs --docs-subdir content --write-config --with-portable",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument('--mirror-folder', required=True, help='Path to the raw mirror folder')
@@ -365,6 +585,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--docs-subdir', default='docs', help='Docs directory name under output (default: docs)')
     p.add_argument('--base-url', default=None, help='Base site URL to resolve absolute links (e.g., https://example.com/)')
     p.add_argument('--write-config', action='store_true', help='Write a minimal mkdocs.yml if none exists')
+    p.add_argument('--with-portable', action='store_true', help='Create portable components (run scripts, pyproject.toml, README)')
     p.add_argument('--silent', action='store_true', help='Suppress progress output')
     return p.parse_args()
 
@@ -382,6 +603,7 @@ def main() -> int:
         base_url=args.base_url,
         silent=bool(args.silent),
         write_config=bool(args.write_config),
+        with_portable=bool(args.with_portable),
     )
     conv = Converter(cfg)
     if not cfg.silent:
