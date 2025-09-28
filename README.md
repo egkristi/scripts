@@ -54,6 +54,37 @@ Python scripts in this collection use **uv's inline dependencies feature**. This
 
 Dependencies are declared directly in each Python script and automatically installed when the script runs.
 
+### Adding New Python Scripts
+
+When creating new Python scripts for this collection, use this template:
+
+```python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#     "requests>=2.25.0",
+#     "click>=8.0.0",
+# ]
+# ///
+"""
+Script description here.
+
+Usage:
+  script-name [options]
+"""
+
+# Your script code here
+if __name__ == "__main__":
+    main()
+```
+
+**Key points:**
+- Use `#!/usr/bin/env -S uv run --script` as shebang
+- Declare dependencies in PEP 723 format between `# /// script` markers
+- Specify minimum Python version requirement
+- Include comprehensive docstring with usage examples
+
 # shell-scripts
 
 ## cat-folder
