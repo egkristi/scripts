@@ -259,9 +259,10 @@ class AppleDeveloperSetup:
             'countryCode': country_code
         }
         
-        # Save progress with user information
+        # Save progress with user information (keep disabled until complete)
         config = existing_config or self.load_template_config()
         config.update(user_info)
+        config['enabled'] = False  # Keep disabled until certificate is verified
         self.save_progress(config, "user_information_gathered")
         
         return user_info
@@ -315,9 +316,10 @@ class AppleDeveloperSetup:
         console.print(f"✅ Private key saved to: {self.private_key_file}")
         console.print("⚠️  [yellow]Keep the private key secure![/yellow]")
         
-        # Save progress
+        # Save progress (keep disabled until certificate is verified)
         config = existing_config or self.load_template_config()
         config.update(user_info)
+        config['enabled'] = False  # Keep disabled until certificate is verified
         config['csrPath'] = str(self.csr_file)
         config['privateKeyPath'] = str(self.private_key_file)
         self.save_progress(config, "csr_generated")
@@ -462,12 +464,12 @@ class AppleDeveloperSetup:
             console.print(f"❌ Error verifying certificate: {e}")
             return False
             
-    def create_config(self, user_info: Dict, identity: str) -> Dict:
+    def create_config(self, user_info: Dict, identity: str, enabled: bool = False) -> Dict:
         """Create the Apple Developer configuration."""
         config = self.load_template_config()
         
         config.update({
-            'enabled': True,
+            'enabled': enabled,
             'identity': identity,
             'teamId': user_info['teamId'],
             'appleId': user_info['appleId'],
@@ -618,8 +620,10 @@ class AppleDeveloperSetup:
             ))
             sys.exit(1)
             
-        # Create and save configuration
-        config = self.create_config(user_info, identity)
+        # Create and save configuration (only enable if everything is working)
+        console.print("✅ Certificate verification successful!")
+        console.print("✅ Enabling Apple Developer configuration...")
+        config = self.create_config(user_info, identity, enabled=True)
         self.save_progress(config, "certificate_configured")
         self.save_config(config)
         
