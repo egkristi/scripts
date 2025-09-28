@@ -620,6 +620,48 @@ dist/
     print("Created .gitignore")
 
 
+def copy_distribution_files(target_dir: Path):
+    """Copy final distribution files to dists subfolder, excluding build support files."""
+    print("Organizing distribution files...")
+    
+    dist_dir = target_dir / "dist"
+    dists_dir = target_dir / "dists"
+    
+    if not dist_dir.exists():
+        print("No dist folder found, skipping distribution file organization.")
+        return
+    
+    # Create dists directory
+    dists_dir.mkdir(exist_ok=True)
+    
+    # Define distribution file patterns (final user-facing files)
+    distribution_patterns = [
+        "*.exe",           # Windows installer
+        "*.dmg",           # macOS DMG
+        "*.AppImage",      # Linux AppImage
+        "*-mac.zip",       # macOS ZIP
+    ]
+    
+    # Copy distribution files
+    copied_files = []
+    for pattern in distribution_patterns:
+        for file_path in dist_dir.glob(pattern):
+            if file_path.is_file():
+                dest_path = dists_dir / file_path.name
+                shutil.copy2(file_path, dest_path)
+                copied_files.append(file_path.name)
+                print(f"  Copied: {file_path.name}")
+    
+    if copied_files:
+        print(f"✅ Distribution files organized in 'dists' folder:")
+        for file_name in sorted(copied_files):
+            file_path = dists_dir / file_name
+            size_mb = file_path.stat().st_size / (1024 * 1024)
+            print(f"  📦 {file_name} ({size_mb:.1f} MB)")
+    else:
+        print("No distribution files found to organize.")
+
+
 def parse_args():
     """Parse command line arguments."""
     import argparse
@@ -710,7 +752,9 @@ def main():
             subprocess.run(["npm", "run", "build-all"], cwd=target_dir, check=True)
             
             print("✅ Desktop applications built successfully!")
-            print("Check the 'dist' folder for the applications.")
+            
+            # Copy distribution files to dists folder
+            copy_distribution_files(target_dir)
             
         except subprocess.CalledProcessError as e:
             print(f"❌ Error building Electron applications: {e}")
@@ -727,6 +771,12 @@ def main():
     print("   - Windows: run_windows.bat")
     print("   - Mac/Linux: ./run_unix.sh")
     print("3. Open browser to http://localhost:8000")
+    
+    # Check if dists folder exists and mention it
+    dists_dir = target_dir / "dists"
+    if dists_dir.exists() and any(dists_dir.iterdir()):
+        print(f"\n📦 Desktop applications available in: {dists_dir}")
+        print("Ready for distribution to end users!")
 
 
 if __name__ == "__main__":
