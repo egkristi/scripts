@@ -4,86 +4,16 @@
 
 The scripts, located in the `sbin/` directory, are various utility scripts to make life easier.
 
-## Requirements
+## Quick Start
 
-**For Python scripts:**
-- **uv** package manager (handles Python versions and dependencies automatically)
-- Python 3.8+ (automatically managed by uv)
+**Requirements:** uv package manager (handles Python and dependencies automatically)
 
-**Install uv (one-time setup):**
-```bash
-# Unix/Mac
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows
-irm https://astral.sh/uv/install.ps1 | iex
-```
-
-**For shell scripts:**
-- Bash (usually pre-installed on Unix/Mac/WSL)
-
-## Setup
-
-To start using the scripts, you can either:
-
-1. **Quick setup** - Run the init.sh directly from GitHub:
+**Quick setup:**
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/egkristi/shell-scripts/refs/heads/main/init.sh)"
 ```
 
-2. **Manual setup** - Clone the repository and run the init.sh script:
-```bash
-git clone https://github.com/egkristi/shell-scripts.git
-cd shell-scripts
-./init.sh
-```
-
-3. **Direct usage** - Use scripts directly without PATH setup:
-```bash
-./shell-scripts/sbin/script-name [options]
-```
-
-## Python Script Dependencies
-
-Python scripts in this collection use **uv's inline dependencies feature**. This means:
-- ✅ **No manual dependency installation required**
-- ✅ **Automatic virtual environment management**
-- ✅ **Isolated dependencies per script**
-- ✅ **Consistent behavior across systems**
-- ✅ **Only requirement: uv installed**
-
-Dependencies are declared directly in each Python script and automatically installed when the script runs.
-
-### Adding New Python Scripts
-
-When creating new Python scripts for this collection, use this template:
-
-```python
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.8"
-# dependencies = [
-#     "requests>=2.25.0",
-#     "click>=8.0.0",
-# ]
-# ///
-"""
-Script description here.
-
-Usage:
-  script-name [options]
-"""
-
-# Your script code here
-if __name__ == "__main__":
-    main()
-```
-
-**Key points:**
-- Use `#!/usr/bin/env -S uv run --script` as shebang
-- Declare dependencies in PEP 723 format between `# /// script` markers
-- Specify minimum Python version requirement
-- Include comprehensive docstring with usage examples
+**📋 For detailed installation instructions, see [INSTALL.md](INSTALL.md)**
 
 # shell-scripts
 
