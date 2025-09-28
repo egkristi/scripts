@@ -309,10 +309,14 @@ class AppleDeveloperSetup:
             f"[bold]Steps to create your certificate:[/bold]\n\n"
             f"1. Sign in with your Apple ID: [cyan]{user_info['appleId']}[/cyan]\n"
             f"2. Click the [bold blue]+[/bold blue] button to add a new certificate\n"
-            f"3. Select [bold]Developer ID Application[/bold]\n"
+            f"3. Select [bold]Developer ID Application[/bold] (NOT iOS Distribution)\n"
             f"4. Upload your CSR file: [cyan]{self.csr_file}[/cyan]\n"
             f"5. Download the certificate (.cer file)\n"
-            f"6. Double-click to install in Keychain Access\n\n"
+            f"   • Default name: [dim]ios_distribution.cer[/dim]\n"
+            f"   • Default location: [dim]~/Downloads/[/dim]\n"
+            f"   • [yellow]Rename to:[/yellow] [cyan]developer_id_application.cer[/cyan]\n"
+            f"6. Double-click [cyan]developer_id_application.cer[/cyan] to install in Keychain Access\n\n"
+            f"[red]⚠️  Important:[/red] Choose [bold]Developer ID Application[/bold], not iOS Distribution!\n"
             f"[yellow]The browser will open automatically...[/yellow]",
             title="📋 Certificate Creation Steps"
         ))
@@ -322,6 +326,17 @@ class AppleDeveloperSetup:
             
         # Wait for user to complete the process
         console.print("\n[yellow]Complete the certificate creation in your browser...[/yellow]")
+        console.print(Panel(
+            f"[bold]After downloading:[/bold]\n\n"
+            f"1. Navigate to [cyan]~/Downloads/[/cyan]\n"
+            f"2. Rename [dim]ios_distribution.cer[/dim] → [cyan]developer_id_application.cer[/cyan]\n"
+            f"3. Double-click [cyan]developer_id_application.cer[/cyan]\n"
+            f"4. Keychain Access will open - click [bold]Add[/bold]\n"
+            f"5. Verify certificate appears in [bold]My Certificates[/bold]\n\n"
+            f"[green]✅ Certificate should show:[/green]\n"
+            f"[cyan]Developer ID Application: {user_info['developerName']} ({user_info['teamId']})[/cyan]",
+            title="📥 Installation Instructions"
+        ))
         Confirm.ask("Press Enter when you have downloaded and installed the certificate", default=True)
         
     def find_installed_certificate(self, user_info: Dict) -> Optional[str]:
