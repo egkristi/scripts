@@ -430,14 +430,14 @@ def create_electron_files(target_dir: Path, site_name: str):
   "name": "portable-docs-app",
   "version": "1.0.0",
   "description": "{site_name} - Portable Documentation",
+  "author": "Documentation Team",
   "main": "electron/main.js",
   "scripts": {{
-    "electron": "electron .",
-    "build": "electron-builder",
-    "build-all": "electron-builder --mac --win --linux",
+    "start": "electron .",
+    "build-mac": "electron-builder --mac",
     "build-win": "electron-builder --win",
-    "build-mac": "electron-builder --mac", 
-    "build-linux": "electron-builder --linux"
+    "build-linux": "electron-builder --linux",
+    "build-all": "electron-builder --mac --win --linux"
   }},
   "devDependencies": {{
     "electron": "^28.0.0",
