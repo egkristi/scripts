@@ -1,0 +1,395 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = []
+# ///
+"""
+Convert a raw website mirror into a MkDocs-friendly structure.
+
+This tool transforms mirrored websites (created by mirror-site or similar tools) 
+into properly structured MkDocs documentation sites with:
+- HTML pages converted to Markdown with embedded HTML
+- Assets copied to appropriate locations
+- Internal links rewritten for offline browsing
+- Automatic navigation structure generation
+
+Features:
+- Supports mirror index files for metadata
+- Preserves page titles and structure
+- Handles relative and absolute link rewriting
+- Generates MkDocs configuration automatically
+- Works with any mirrored website structure
+
+Usage:
+  mirror-to-mkdocs --mirror-folder ./mirror \
+                   --output-folder ./mkdocs-site \
+                   [--base-url https://example.com/] \
+                   [--write-config]
+
+Examples:
+  # Convert a mirrored documentation site
+  mirror-to-mkdocs --mirror-folder docs-mirror \
+                   --output-folder docs-mkdocs \
+                   --base-url https://docs.example.com/ \
+                   --write-config
+
+  # Convert with custom docs directory
+  mirror-to-mkdocs --mirror-folder site-mirror \
+                   --output-folder my-mkdocs \
+                   --docs-subdir content \
+                   --write-config
+
+  # Silent conversion for automation
+  mirror-to-mkdocs --mirror-folder ./mirror \
+                   --output-folder ./site \
+                   --silent --write-config
+
+Note: This tool works best with mirrors created by mirror-site that include
+index files with metadata, but can also process any HTML file structure.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
+from urllib.parse import urljoin, urlparse
+
+# ----------------------------
+# Parsers & helpers
+# ----------------------------
+
+HTML_EXTENSIONS = {".html", ".htm", ""}
+ASSET_EXTENSIONS = {
+    # Images
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".heic", ".heif",
+    # Styles and scripts
+    ".css", ".js", ".mjs", ".map",
+    # Fonts
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    # Data
+    ".json", ".csv", ".tsv", ".xml", ".yml", ".yaml",
+    # Documents
+    ".pdf", ".md", ".rtf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".epub", ".odt", ".ods", ".odp",
+    # Code and notebooks
+    ".ipynb", ".py",
+    # Media
+    ".mp3", ".wav", ".ogg", ".mp4", ".webm", ".ogv", ".mov", ".m4v", ".mkv",
+    # Archives and binaries
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".zst", ".7z", ".rar", ".wasm",
+}
+
+
+class LinkExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hrefs: List[str] = []
+        self.srcs: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
+        for (k, v) in attrs:
+            if v is None:
+                continue
+            if k.lower() == "href":
+                self.hrefs.append(v)
+            elif k.lower() == "src":
+                self.srcs.append(v)
+
+
+@dataclass
+class Config:
+    mirror_folder: Path
+    output_folder: Path
+    docs_folder: Path
+    base_url: Optional[str]
+    silent: bool
+    write_config: bool
+
+
+class Converter:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        # Map mirror HTML file -> docs page directory (containing index.md)
+        self.html_to_docs_dir: Dict[Path, Path] = {}
+        # Set of asset paths in mirror to be copied to docs
+        self.assets: Set[Path] = set()
+        # Optional titles for pages (from mirror index or parsed <title>)
+        self.page_titles: Dict[Path, str] = {}
+
+    def log(self, msg: str) -> None:
+        if not self.cfg.silent:
+            print(msg)
+
+    def scan_mirror(self) -> None:
+        """Populate html_to_docs_dir and assets.
+
+        Preference order:
+        1) If _mirror_index.json exists, load it and use its items to determine pages and assets.
+        2) Otherwise, fall back to scanning the mirror folder.
+        """
+        index_path = self.cfg.mirror_folder / "_mirror_index.json"
+        if index_path.exists():
+            try:
+                import json
+                payload = json.loads(index_path.read_text(encoding="utf-8"))
+                # Auto-detect base_url from meta if not provided
+                if self.cfg.base_url is None:
+                    meta = payload.get("meta", {}) if isinstance(payload, dict) else {}
+                    bu = meta.get("base_url") if isinstance(meta, dict) else None
+                    if bu:
+                        self.cfg.base_url = bu
+                items = payload.get("items", []) if isinstance(payload, dict) else []
+                for it in items:
+                    try:
+                        if not isinstance(it, dict):
+                            continue
+                        if it.get("type") == "file":
+                            rel = it.get("path")
+                            if not rel:
+                                continue
+                            p = (self.cfg.mirror_folder / rel).resolve()
+                            name = p.name
+                            ext = p.suffix.lower()
+                            kind = it.get("kind")
+                            if kind == "page" or name == "index.html" or ext in {".html", ".htm"}:
+                                # Determine docs dir for this HTML page
+                                if name == "index.html":
+                                    docs_dir = self.cfg.docs_folder / p.relative_to(self.cfg.mirror_folder).parent
+                                else:
+                                    docs_dir = self.cfg.docs_folder / p.relative_to(self.cfg.mirror_folder).with_suffix("")
+                                self.html_to_docs_dir[p] = docs_dir
+                                # Title from page_meta if available
+                                pm = it.get("page_meta") or {}
+                                if isinstance(pm, dict):
+                                    t = pm.get("title")
+                                    if isinstance(t, str) and t.strip():
+                                        self.page_titles[p] = t.strip()
+                            else:
+                                self.assets.add(p)
+                        elif it.get("type") == "dir":
+                            # No-op for directories
+                            pass
+                    except Exception:
+                        continue
+                self.log(f"Scanned mirror via index: {len(self.html_to_docs_dir)} pages, {len(self.assets)} assets")
+                return
+            except Exception:
+                # Fall back to filesystem scan
+                pass
+
+        # Fallback: filesystem scan
+        mroot = self.cfg.mirror_folder
+        for p in mroot.rglob('*'):
+            if p.is_dir():
+                continue
+            rel = p.relative_to(mroot)
+            ext = p.suffix.lower()
+            if ext in HTML_EXTENSIONS or rel.name == 'index.html':
+                # Determine docs dir for this HTML page
+                if rel.name == 'index.html':
+                    docs_dir = self.cfg.docs_folder / rel.parent
+                elif ext in HTML_EXTENSIONS:
+                    # page.html -> docs/<rel/without_ext>/
+                    docs_dir = self.cfg.docs_folder / rel.with_suffix('')
+                else:
+                    # fallback
+                    docs_dir = self.cfg.docs_folder / rel.parent
+                self.html_to_docs_dir[p] = docs_dir
+            else:
+                # Asset
+                self.assets.add(p)
+
+    def prepare_output(self) -> None:
+        self.cfg.docs_folder.mkdir(parents=True, exist_ok=True)
+
+    def write_mkdocs_config(self) -> None:
+        if not self.cfg.write_config:
+            return
+        yml = self.cfg.output_folder / 'mkdocs.yml'
+        # Build curated nav using titles and grouping by top-level section
+        # Map: section -> list[(title, md_rel_path)]
+        section_map: Dict[str, List[Tuple[str, str]]] = {}
+        for mirror_html, docs_dir in self.html_to_docs_dir.items():
+            md_rel = docs_dir.relative_to(self.cfg.docs_folder) / 'index.md'
+            # Determine section (first path segment) and title
+            parts = md_rel.parts
+            section = parts[0] if len(parts) > 1 else "root"
+            title = self.page_titles.get(mirror_html)
+            if not title:
+                # Fallback title from filename/parent
+                title = docs_dir.name if docs_dir.name != '' else 'Home'
+            section_map.setdefault(section, []).append((title, md_rel.as_posix()))
+
+        # Sort entries by title within sections, move root section to top
+        nav_lines: List[str] = []
+        nav_lines.append('site_name: Mirrored Site')
+        nav_lines.append(f'docs_dir: {self.cfg.docs_folder.name}')
+        nav_lines.append('theme:')
+        nav_lines.append('  name: material')
+        nav_lines.append('nav:')
+        # Root entries first
+        if 'root' in section_map:
+            for title, path in sorted(section_map['root'], key=lambda x: x[0].lower()):
+                nav_lines.append(f'  - {title}: {path}')
+        for section in sorted(k for k in section_map.keys() if k != 'root'):
+            nav_lines.append(f'  - {section}:')
+            for title, path in sorted(section_map[section], key=lambda x: x[0].lower()):
+                nav_lines.append(f'    - {title}: {path}')
+
+        yml.write_text("\n".join(nav_lines) + "\n", encoding='utf-8')
+        self.log(f"Wrote mkdocs.yml -> {yml}")
+
+    def compute_target_href(self, from_docs_md: Path, link_val: str) -> Optional[str]:
+        # Resolve absolute URL against base_url if provided
+        abs_url = link_val
+        if self.cfg.base_url and (link_val.startswith('/') or '://' in link_val):
+            abs_url = urljoin(self.cfg.base_url, link_val)
+        # Convert to mirror local path if it's an on-site path
+        parsed = urlparse(abs_url)
+        if parsed.scheme in ('http', 'https') and self.cfg.base_url:
+            base = urlparse(self.cfg.base_url)
+            if (parsed.netloc != base.netloc) or (parsed.scheme != base.scheme):
+                return None  # external link: leave as is
+            mirror_path = self.cfg.mirror_folder / parsed.path.lstrip('/')
+        elif link_val.startswith('/'):
+            mirror_path = self.cfg.mirror_folder / link_val.lstrip('/')
+        else:
+            # relative to page; compute relative to mirrored source corresponding to from_docs_md
+            # Find source mirror html by reverse lookup
+            mirror_src = None
+            for k, v in self.html_to_docs_dir.items():
+                if v / 'index.md' == from_docs_md:
+                    mirror_src = k
+                    break
+            if mirror_src is None:
+                return None
+            mirror_path = (mirror_src.parent / link_val).resolve()
+            try:
+                mirror_path = mirror_path.relative_to(self.cfg.mirror_folder)
+                mirror_path = self.cfg.mirror_folder / mirror_path
+            except Exception:
+                # outside mirror
+                return None
+
+        # Now decide target
+        if mirror_path in self.html_to_docs_dir:
+            # Link to another page: point to that page directory (mkdocs route)
+            target_dir = self.html_to_docs_dir[mirror_path]
+            rel = os.path.relpath(target_dir, start=from_docs_md.parent)
+            rel = Path(rel).as_posix()
+            if not rel.endswith('/'):
+                rel += '/'
+            return rel
+        elif mirror_path.is_file():
+            # Asset link: copy will place at docs/<same rel>
+            asset_rel = mirror_path.relative_to(self.cfg.mirror_folder)
+            docs_asset = self.cfg.docs_folder / asset_rel
+            rel = os.path.relpath(docs_asset, start=from_docs_md.parent)
+            return Path(rel).as_posix()
+        else:
+            return None
+
+    def rewrite_links(self, html_text: str, from_docs_md: Path) -> str:
+        parser = LinkExtractor()
+        try:
+            parser.feed(html_text)
+        except Exception:
+            pass
+        replacements: List[Tuple[str, str]] = []
+        for href in parser.hrefs:
+            new = self.compute_target_href(from_docs_md, href)
+            if new:
+                replacements.append((href, new))
+        for src in parser.srcs:
+            new = self.compute_target_href(from_docs_md, src)
+            if new:
+                replacements.append((src, new))
+        # Replace conservatively inside href/src attributes
+        for old, new in sorted(set(replacements), key=lambda x: -len(x[0])):
+            pattern = re.compile(rf'(href|src)=(\"|\")(?:{re.escape(old)})\2')
+            html_text = pattern.sub(lambda m: f'{m.group(1)}="{new}"', html_text)
+        return html_text
+
+    def convert_pages(self) -> None:
+        for mirror_html, docs_dir in self.html_to_docs_dir.items():
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            md_path = docs_dir / 'index.md'
+            html = mirror_html.read_text(encoding='utf-8', errors='replace')
+            # Determine title: prefer provided titles, else parse <title>
+            title = self.page_titles.get(mirror_html)
+            if not title:
+                m = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+                if m:
+                    title = re.sub(r"\s+", " ", m.group(1)).strip()
+            if not title:
+                # Fallback to directory/page name
+                title = docs_dir.name if docs_dir.name else 'Home'
+            html = self.rewrite_links(html, md_path)
+            source_rel = mirror_html.relative_to(self.cfg.mirror_folder).as_posix()
+            content = f"# {title}\n\n" + f"<!-- Source: /{source_rel} -->\n\n" + html
+            md_path.write_text(content, encoding='utf-8')
+            self.log(f"PAGE   {mirror_html} -> {md_path}")
+
+    def copy_assets(self) -> None:
+        for ap in self.assets:
+            rel = ap.relative_to(self.cfg.mirror_folder)
+            dest = self.cfg.docs_folder / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ap, dest)
+            self.log(f"ASSET  {ap} -> {dest}")
+
+    def run(self) -> None:
+        self.prepare_output()
+        self.scan_mirror()
+        self.copy_assets()
+        self.convert_pages()
+        self.write_mkdocs_config()
+        self.log("Conversion completed.")
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Convert raw website mirror into MkDocs-friendly structure",
+        epilog="Examples:\n"
+               "  mirror-to-mkdocs --mirror-folder docs-mirror --output-folder mkdocs-site --write-config\n"
+               "  mirror-to-mkdocs --mirror-folder ./mirror --output-folder ./site --base-url https://example.com/\n"
+               "  mirror-to-mkdocs --mirror-folder site-mirror --output-folder my-docs --docs-subdir content",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument('--mirror-folder', required=True, help='Path to the raw mirror folder')
+    p.add_argument('--output-folder', required=True, help='MkDocs project root (docs/ will be inside)')
+    p.add_argument('--docs-subdir', default='docs', help='Docs directory name under output (default: docs)')
+    p.add_argument('--base-url', default=None, help='Base site URL to resolve absolute links (e.g., https://example.com/)')
+    p.add_argument('--write-config', action='store_true', help='Write a minimal mkdocs.yml if none exists')
+    p.add_argument('--silent', action='store_true', help='Suppress progress output')
+    return p.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    mirror_folder = Path(args.mirror_folder).resolve()
+    output_folder = Path(args.output_folder).resolve()
+    docs_folder = output_folder / args.docs_subdir
+    output_folder.mkdir(parents=True, exist_ok=True)
+    cfg = Config(
+        mirror_folder=mirror_folder,
+        output_folder=output_folder,
+        docs_folder=docs_folder,
+        base_url=args.base_url,
+        silent=bool(args.silent),
+        write_config=bool(args.write_config),
+    )
+    conv = Converter(cfg)
+    if not cfg.silent:
+        print(f"Converting mirror {mirror_folder} -> MkDocs at {docs_folder}")
+    conv.run()
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

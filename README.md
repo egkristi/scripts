@@ -67,3 +67,41 @@ mirror-site --website-url https://site.com/ \
 ```
 
 **Note:** Uses uv's inline dependencies - no manual package installation required!
+
+## mirror-to-mkdocs
+Convert raw website mirrors into MkDocs-friendly documentation sites.
+- **Language:** Python (uses uv for dependency management)
+- **Dependencies:** None (uses only Python standard library)
+- **Requirements:** uv package manager only
+
+**Features:**
+- Converts mirrored HTML pages to Markdown with embedded HTML
+- Preserves page titles and navigation structure
+- Rewrites internal links for offline browsing
+- Copies assets to appropriate locations
+- Generates MkDocs configuration automatically
+- Works with mirror-site output or any HTML file structure
+
+**Usage:** `mirror-to-mkdocs --mirror-folder MIRROR --output-folder OUTPUT [options]`
+
+**Examples:**
+```bash
+# Convert a mirrored documentation site
+mirror-to-mkdocs --mirror-folder docs-mirror \
+                 --output-folder mkdocs-site \
+                 --base-url https://docs.example.com/ \
+                 --write-config
+
+# Convert with custom structure
+mirror-to-mkdocs --mirror-folder site-mirror \
+                 --output-folder my-docs \
+                 --docs-subdir content \
+                 --write-config
+
+# Silent conversion for automation
+mirror-to-mkdocs --mirror-folder ./mirror \
+                 --output-folder ./site \
+                 --silent --write-config
+```
+
+**Note:** Works perfectly with mirror-site output that includes metadata!
