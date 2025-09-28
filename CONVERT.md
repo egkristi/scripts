@@ -1,6 +1,6 @@
 # Converter: Raw Mirror to MkDocs
 
-This document describes the converter script at `sbin/mirror-to-mkdocs`, which transforms a raw website mirror (produced by `sbin/mirror-site`) into a MkDocs-ready project.
+This document describes the converter script at `sbin/convert-to-mkdocs`, which transforms a raw website mirror (produced by `sbin/mirror-site`) into a MkDocs-ready project.
 
 ## What it does
 
@@ -28,7 +28,7 @@ This document describes the converter script at `sbin/mirror-to-mkdocs`, which t
 ## CLI
 
 ```
-mirror-to-mkdocs \
+convert-to-mkdocs \
   --mirror-folder INF100_H25 \
   --output-folder INF100_H25_DOCS \
   [--docs-subdir docs] \
@@ -75,7 +75,7 @@ mirror-to-mkdocs \
 - Convert an existing mirror into a new MkDocs project:
 
 ```
-mirror-to-mkdocs \
+convert-to-mkdocs \
   --mirror-folder INF100_H25 \
   --output-folder INF100_H25_DOCS \
   --write-config
@@ -84,7 +84,7 @@ mirror-to-mkdocs \
 - Convert and then serve with the helper:
 
 ```
-mirror-to-mkdocs \
+convert-to-mkdocs \
   --mirror-folder INF100_H25 \
   --output-folder INF100_H25_DOCS \
   --write-config
@@ -112,7 +112,7 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    participant Conv as mirror-to-mkdocs
+    participant Conv as convert-to-mkdocs
     participant Page as HTML Page
     participant Docs as docs/page/index.md
 

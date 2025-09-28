@@ -1,0 +1,733 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = []
+# ///
+"""
+Build Portable MkDocs Site
+
+This script creates a self-contained MkDocs site that can be run on Windows, Mac, and Linux
+using uv for fast dependency management. It can also optionally create Electron desktop
+applications for offline documentation viewing.
+
+Features:
+- Creates portable MkDocs sites with uv dependency management
+- Generates cross-platform run scripts (Windows .bat/.ps1, Unix .sh)
+- Optional Electron desktop application support
+- Automatic navigation structure generation
+- Self-contained with no external dependencies
+
+Usage:
+  mkdocs-portable --source-folder SOURCE --target-folder TARGET [options]
+
+Examples:
+  # Create basic portable site
+  mkdocs-portable --source-folder docs --target-folder portable_docs
+
+  # Create with custom site name and description
+  mkdocs-portable --source-folder studyguide \
+                  --target-folder inf100_portable \
+                  --site-name "INF100 Study Guide" \
+                  --site-description "Programming course materials"
+
+  # Create with Electron desktop app files
+  mkdocs-portable --source-folder docs \
+                  --target-folder portable_docs \
+                  --with-electron
+
+  # Create and build desktop applications automatically
+  mkdocs-portable --source-folder docs \
+                  --target-folder portable_docs \
+                  --build-electron
+
+Perfect for creating offline documentation that can be shared and run anywhere!
+"""
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+
+
+def create_mkdocs_config(docs_dir: Path, nav_structure: List[Dict], site_name: str, site_description: str, site_author: str) -> str:
+    """Create MkDocs configuration file content."""
+    
+    config = f"""site_name: {site_name}
+site_description: {site_description}
+site_author: {site_author}
+site_url: ""
+
+# Repository
+repo_name: {site_name}
+edit_uri: ""
+
+# Navigation
+nav:
+"""
+    
+    def format_nav_item(item, indent=2):
+        spaces = " " * indent
+        if isinstance(item, dict):
+            for key, value in item.items():
+                if isinstance(value, list):
+                    config_lines = [f"{spaces}- {key}:"]
+                    for subitem in value:
+                        config_lines.extend(format_nav_item(subitem, indent + 2))
+                    return config_lines
+                else:
+                    return [f"{spaces}- {key}: {value}"]
+        else:
+            return [f"{spaces}- {item}"]
+    
+    nav_lines = []
+    for item in nav_structure:
+        nav_lines.extend(format_nav_item(item))
+    
+    config += "\n".join(nav_lines)
+    
+    config += """
+
+# Theme
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# Extensions
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - footnotes
+  - md_in_html
+  - attr_list
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+# Plugins
+plugins:
+  - search
+  - offline
+
+# Extra
+extra:
+  generator: false
+"""
+    
+    return config
+
+
+def get_navigation_structure(docs_dir: Path) -> List[Dict]:
+    """Generate navigation structure from docs directory."""
+    nav_structure = []
+    
+    # Add index if it exists
+    if (docs_dir / "index.md").exists():
+        nav_structure.append("Home: index.md")
+    
+    # Get all markdown files
+    md_files = list(docs_dir.glob("*.md"))
+    md_files.sort()
+    
+    # Add main files (excluding index.md)
+    main_files = []
+    for md_file in md_files:
+        if md_file.name != "index.md":
+            # Convert filename to title
+            title = md_file.stem.replace("_", " ").replace("-", " ").title()
+            main_files.append(f"{title}: {md_file.name}")
+    
+    nav_structure.extend(main_files)
+    
+    # Add subdirectories
+    subdirs = [d for d in docs_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
+    subdirs.sort()
+    
+    for subdir in subdirs:
+        subdir_files = list(subdir.glob("*.md"))
+        if subdir_files:
+            subdir_files.sort()
+            subdir_nav = []
+            for md_file in subdir_files:
+                title = md_file.stem.replace("_", " ").replace("-", " ").title()
+                relative_path = md_file.relative_to(docs_dir).as_posix()
+                subdir_nav.append(f"{title}: {relative_path}")
+            
+            section_title = subdir.name.replace("_", " ").replace("-", " ").title()
+            nav_structure.append({section_title: subdir_nav})
+    
+    return nav_structure
+
+
+def copy_source_files(source_dir: Path, docs_dir: Path):
+    """Copy source files to docs directory."""
+    print(f"Copying files from {source_dir} to {docs_dir}")
+    
+    if not source_dir.exists():
+        raise FileNotFoundError(f"Source directory not found: {source_dir}")
+    
+    # Create docs directory
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Copy all files and directories
+    for item in source_dir.iterdir():
+        if item.name.startswith('.'):
+            continue  # Skip hidden files
+            
+        dest = docs_dir / item.name
+        if item.is_file():
+            shutil.copy2(item, dest)
+            print(f"  Copied: {item.name}")
+        elif item.is_dir():
+            shutil.copytree(item, dest, dirs_exist_ok=True)
+            print(f"  Copied directory: {item.name}")
+
+
+def create_uv_files(target_dir: Path):
+    """Create uv configuration files."""
+    print("Creating uv configuration...")
+    
+    # Create pyproject.toml
+    pyproject_content = """[project]
+name = "portable-mkdocs-site"
+version = "1.0.0"
+description = "Portable MkDocs documentation site"
+requires-python = ">=3.8"
+dependencies = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
+"""
+    
+    (target_dir / "pyproject.toml").write_text(pyproject_content)
+    print("Created pyproject.toml")
+
+
+def create_run_scripts(target_dir: Path):
+    """Create platform-specific run scripts."""
+    print("Creating run scripts...")
+    
+    # Windows batch file
+    windows_bat = """@echo off
+echo Starting MkDocs documentation server...
+echo.
+echo Installing dependencies (first run may take a moment)...
+uv sync --quiet
+echo.
+echo Starting server at http://localhost:8000
+echo Press Ctrl+C to stop the server
+echo.
+uv run mkdocs serve -a localhost:8000
+pause
+"""
+    
+    # Windows PowerShell script
+    windows_ps1 = """Write-Host "Starting MkDocs documentation server..." -ForegroundColor Green
+Write-Host ""
+Write-Host "Installing dependencies (first run may take a moment)..." -ForegroundColor Yellow
+uv sync --quiet
+Write-Host ""
+Write-Host "Starting server at http://localhost:8000" -ForegroundColor Green
+Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Yellow
+Write-Host ""
+uv run mkdocs serve -a localhost:8000
+Read-Host "Press Enter to exit"
+"""
+    
+    # Unix shell script
+    unix_sh = """#!/bin/bash
+echo "Starting MkDocs documentation server..."
+echo ""
+echo "Installing dependencies (first run may take a moment)..."
+uv sync --quiet
+echo ""
+echo "Starting server at http://localhost:8000"
+echo "Press Ctrl+C to stop the server"
+echo ""
+uv run mkdocs serve -a localhost:8000
+"""
+    
+    (target_dir / "run_windows.bat").write_text(windows_bat, encoding='utf-8')
+    (target_dir / "run_windows.ps1").write_text(windows_ps1, encoding='utf-8')
+    
+    unix_script = target_dir / "run_unix.sh"
+    unix_script.write_text(unix_sh, encoding='utf-8')
+    unix_script.chmod(0o755)  # Make executable
+    
+    print("Created run_windows.bat")
+    print("Created run_windows.ps1") 
+    print("Created run_unix.sh")
+
+
+def create_electron_files(target_dir: Path, site_name: str):
+    """Create Electron application files."""
+    print("Creating Electron application files...")
+    
+    # package.json for Electron
+    package_json = f"""{{
+  "name": "portable-docs-app",
+  "version": "1.0.0",
+  "description": "{site_name} - Portable Documentation",
+  "main": "electron/main.js",
+  "scripts": {{
+    "electron": "electron .",
+    "build": "electron-builder",
+    "build-all": "electron-builder --mac --win --linux",
+    "build-win": "electron-builder --win",
+    "build-mac": "electron-builder --mac", 
+    "build-linux": "electron-builder --linux"
+  }},
+  "devDependencies": {{
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.0"
+  }},
+  "build": {{
+    "appId": "com.portable.docs",
+    "productName": "{site_name}",
+    "directories": {{
+      "output": "dist"
+    }},
+    "files": [
+      "electron/**/*",
+      "docs/**/*",
+      "mkdocs.yml",
+      "pyproject.toml"
+    ],
+    "mac": {{
+      "category": "public.app-category.education"
+    }},
+    "win": {{
+      "target": "nsis"
+    }},
+    "linux": {{
+      "target": "AppImage"
+    }}
+  }}
+}}"""
+    
+    # Electron main process
+    electron_main = """const { app, BrowserWindow, shell } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+let mainWindow;
+let mkdocsProcess;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true
+    },
+    icon: path.join(__dirname, 'icon.png')
+  });
+
+  // Start MkDocs server
+  startMkDocsServer();
+  
+  // Load the documentation after a short delay
+  setTimeout(() => {
+    mainWindow.loadURL('http://localhost:8000');
+  }, 3000);
+
+  // Handle external links
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+}
+
+function startMkDocsServer() {
+  const isWindows = process.platform === 'win32';
+  const command = isWindows ? 'uv.exe' : 'uv';
+  const args = ['run', 'mkdocs', 'serve', '-a', 'localhost:8000'];
+  
+  mkdocsProcess = spawn(command, args, {
+    cwd: path.join(__dirname, '..'),
+    stdio: 'pipe'
+  });
+  
+  mkdocsProcess.on('error', (err) => {
+    console.error('Failed to start MkDocs:', err);
+  });
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (mkdocsProcess) {
+    mkdocsProcess.kill();
+  }
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+
+app.on('before-quit', () => {
+  if (mkdocsProcess) {
+    mkdocsProcess.kill();
+  }
+});
+"""
+    
+    # Create electron directory
+    electron_dir = target_dir / "electron"
+    electron_dir.mkdir(exist_ok=True)
+    
+    (target_dir / "package.json").write_text(package_json)
+    (electron_dir / "main.js").write_text(electron_main)
+    
+    print("Created package.json")
+    print("Created electron/main.js")
+
+
+def create_electron_build_scripts(target_dir: Path):
+    """Create scripts to build Electron applications."""
+    print("Creating Electron build scripts...")
+    
+    # Windows build script
+    build_windows_bat = """@echo off
+echo Building Electron desktop applications...
+echo.
+echo Installing Node.js dependencies...
+npm install
+echo.
+echo Building applications for all platforms...
+npm run build-all
+echo.
+echo Build complete! Check the 'dist' folder for applications.
+pause
+"""
+    
+    # Unix build script  
+    build_unix_sh = """#!/bin/bash
+echo "Building Electron desktop applications..."
+echo ""
+echo "Installing Node.js dependencies..."
+npm install
+echo ""
+echo "Building applications for all platforms..."
+npm run build-all
+echo ""
+echo "Build complete! Check the 'dist' folder for applications."
+"""
+    
+    (target_dir / "build_electron_windows.bat").write_text(build_windows_bat)
+    
+    build_script = target_dir / "build_electron_unix.sh"
+    build_script.write_text(build_unix_sh)
+    build_script.chmod(0o755)
+    
+    print("Created build_electron_windows.bat")
+    print("Created build_electron_unix.sh")
+
+
+def create_readme(target_dir: Path, site_name: str):
+    """Create README file for the portable site."""
+    print("Creating README...")
+    
+    readme_content = f"""# {site_name} - Portable Documentation
+
+This is a portable, self-contained documentation site that can run on Windows, Mac, and Linux.
+
+## Quick Start
+
+### Option 1: Web Server (Recommended)
+
+**Windows:**
+- Double-click `run_windows.bat` OR
+- Right-click `run_windows.ps1` → "Run with PowerShell"
+
+**Mac/Linux:**
+- Open terminal in this folder
+- Run: `./run_unix.sh`
+
+The documentation will be available at: http://localhost:8000
+
+### Option 2: Desktop Application (if available)
+
+If Electron applications were built, you can find them in the `dist/` folder:
+- Windows: `.exe` installer
+- Mac: `.dmg` or `.app` file  
+- Linux: `.AppImage` file
+
+## Requirements
+
+- **uv package manager** (for web server version)
+- **Python 3.8+** (automatically managed by uv)
+
+## Installation
+
+### Install uv (if not already installed)
+
+**Windows:**
+```powershell
+winget install astral-sh.uv
+```
+
+**Mac:**
+```bash
+brew install uv
+```
+
+**Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+## Manual Usage
+
+If you prefer to run commands manually:
+
+```bash
+# Install dependencies
+uv sync
+
+# Start the documentation server
+uv run mkdocs serve -a localhost:8000
+```
+
+## Building Desktop Applications
+
+If you want to create desktop applications:
+
+1. Install Node.js 16+ from https://nodejs.org
+2. Run the appropriate build script:
+   - Windows: `build_electron_windows.bat`
+   - Mac/Linux: `./build_electron_unix.sh`
+
+## Troubleshooting
+
+- **"uv: command not found"**: Install uv package manager (see Installation above)
+- **Permission denied on Unix**: Run `chmod +x run_unix.sh` then try again
+- **Port already in use**: Close other applications using port 8000, or edit the run scripts to use a different port
+
+## Contents
+
+This portable documentation includes:
+- Complete documentation files
+- MkDocs configuration
+- Cross-platform run scripts
+- uv dependency management
+- Optional Electron desktop application files
+
+Enjoy your portable documentation! 📚
+"""
+    
+    (target_dir / "README.md").write_text(readme_content)
+    print("Created README.md")
+
+
+def create_gitignore(target_dir: Path):
+    """Create .gitignore file."""
+    gitignore_content = """# Dependencies
+node_modules/
+.uv/
+
+# MkDocs build output
+site/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Electron build output
+dist/
+"""
+    
+    (target_dir / ".gitignore").write_text(gitignore_content)
+    print("Created .gitignore")
+
+
+def parse_args():
+    """Parse command line arguments."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Build portable MkDocs site with cross-platform support",
+        epilog="Examples:\n"
+               "  mkdocs-portable --source-folder docs --target-folder portable_docs\n"
+               "  mkdocs-portable --source-folder studyguide --site-name 'My Guide' --with-electron\n"
+               "  mkdocs-portable --source-folder content --target-folder dist --build-electron",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument("--source-folder", required=True,
+                       help="Source folder containing documentation files")
+    parser.add_argument("--target-folder", required=True,
+                       help="Target folder for the portable site")
+    parser.add_argument("--site-name", default="Documentation",
+                       help="Name of the documentation site (default: Documentation)")
+    parser.add_argument("--site-description", default="Portable documentation site",
+                       help="Description of the documentation site")
+    parser.add_argument("--site-author", default="Documentation Team",
+                       help="Author of the documentation site")
+    parser.add_argument("--with-electron", action="store_true",
+                       help="Include Electron desktop application files")
+    parser.add_argument("--build-electron", action="store_true",
+                       help="Build Electron applications after creating files (requires Node.js)")
+    
+    return parser.parse_args()
+
+
+def main():
+    """Main function to build the portable MkDocs site."""
+    args = parse_args()
+    
+    # Get paths
+    source_dir = Path(args.source_folder).resolve()
+    target_dir = Path(args.target_folder).resolve()
+    
+    print(f"Building portable MkDocs site...")
+    print(f"Source: {source_dir}")
+    print(f"Target: {target_dir}")
+    print(f"Site: {args.site_name}")
+    print()
+    
+    # Clean and create target directory
+    if target_dir.exists():
+        print("Removing existing target directory...")
+        shutil.rmtree(target_dir)
+    
+    target_dir.mkdir(parents=True)
+    docs_dir = target_dir / "docs"
+    
+    # Copy source files
+    copy_source_files(source_dir, docs_dir)
+    
+    # Create MkDocs configuration
+    print("Creating MkDocs configuration...")
+    nav_structure = get_navigation_structure(docs_dir)
+    mkdocs_config = create_mkdocs_config(docs_dir, nav_structure, args.site_name, args.site_description, args.site_author)
+    (target_dir / "mkdocs.yml").write_text(mkdocs_config, encoding='utf-8')
+    
+    # Create supporting files
+    create_uv_files(target_dir)
+    create_run_scripts(target_dir)
+    
+    # Create Electron files if requested
+    if args.with_electron or args.build_electron:
+        create_electron_files(target_dir, args.site_name)
+        create_electron_build_scripts(target_dir)
+    
+    create_readme(target_dir, args.site_name)
+    create_gitignore(target_dir)
+    
+    # Build Electron applications if requested
+    if args.build_electron:
+        print("\nBuilding Electron applications...")
+        try:
+            # Check if Node.js is available
+            subprocess.run(["node", "--version"], check=True, capture_output=True)
+            
+            # Install npm dependencies
+            print("Installing Node.js dependencies...")
+            subprocess.run(["npm", "install"], cwd=target_dir, check=True)
+            
+            # Build applications
+            print("Building desktop applications...")
+            subprocess.run(["npm", "run", "build-all"], cwd=target_dir, check=True)
+            
+            print("✅ Desktop applications built successfully!")
+            print("Check the 'dist' folder for the applications.")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Error building Electron applications: {e}")
+            print("You can build them manually later using the build scripts.")
+        except FileNotFoundError:
+            print("❌ Node.js not found. Install Node.js to build desktop applications.")
+            print("You can build them manually later using the build scripts.")
+    
+    print(f"\n✅ Portable MkDocs site created successfully!")
+    print(f"Location: {target_dir}")
+    print("\nTo use the documentation:")
+    print("1. Navigate to the target folder")
+    print("2. Run the appropriate script:")
+    print("   - Windows: run_windows.bat")
+    print("   - Mac/Linux: ./run_unix.sh")
+    print("3. Open browser to http://localhost:8000")
+
+
+if __name__ == "__main__":
+    main()

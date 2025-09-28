@@ -10,7 +10,7 @@ This document describes the helper script at `sbin/mkdocs-serve`, a robust wrapp
 - Ensure a valid MkDocs project structure exists (create a minimal `mkdocs.yml` and `docs/index.md` if necessary).
 - Start a local dev server with `mkdocs serve` on a specified host and port.
 
-It is intended to work hand-in-hand with the converter at `sbin/mirror-to-mkdocs` that builds a `docs/` tree from a raw mirror.
+It is intended to work hand-in-hand with the converter at `sbin/convert-to-mkdocs` that builds a `docs/` tree from a raw mirror.
 
 ## Usage
 
@@ -59,7 +59,7 @@ mkdocs-serve \
 
 ## Example flows
 
-- **Serve a converted mirror** (after running `sbin/mirror-to-mkdocs`):
+- **Serve a converted mirror** (after running `sbin/convert-to-mkdocs`):
   ```
   mkdocs-serve --project-root MKDOCS_PROJECT --install-deps
   ```
@@ -86,7 +86,7 @@ mkdocs-serve \
 ## Related scripts
 
 - `sbin/mirror-site` — Mirrors a website to a local folder and writes `_mirror_index.json`.
-- `sbin/mirror-to-mkdocs` — Converts the raw mirror to a MkDocs-ready project with curated navigation.
+- `sbin/convert-to-mkdocs` — Converts the raw mirror to a MkDocs-ready project with curated navigation.
 
 ## Notes
 

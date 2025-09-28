@@ -15,34 +15,33 @@ into properly structured MkDocs documentation sites with:
 
 Features:
 - Supports mirror index files for metadata
-- Preserves page titles and structure
 - Handles relative and absolute link rewriting
 - Generates MkDocs configuration automatically
 - Works with any mirrored website structure
 
 Usage:
-  mirror-to-mkdocs --mirror-folder ./mirror \
-                   --output-folder ./mkdocs-site \
-                   [--base-url https://example.com/] \
-                   [--write-config]
+  convert-to-mkdocs --mirror-folder MIRROR \
+                    --output-folder OUTPUT \
+                    [--base-url https://example.com/] \
+                    [--write-config]
 
 Examples:
   # Convert a mirrored documentation site
-  mirror-to-mkdocs --mirror-folder docs-mirror \
-                   --output-folder docs-mkdocs \
-                   --base-url https://docs.example.com/ \
-                   --write-config
+  convert-to-mkdocs --mirror-folder docs-mirror \
+                    --output-folder mkdocs-site \
+                    --base-url https://docs.example.com/ \
+                    --write-config
 
-  # Convert with custom docs directory
-  mirror-to-mkdocs --mirror-folder site-mirror \
-                   --output-folder my-mkdocs \
-                   --docs-subdir content \
-                   --write-config
+  # Convert with custom structure
+  convert-to-mkdocs --mirror-folder site-mirror \
+                    --output-folder my-mkdocs \
+                    --docs-subdir content \
+                    --write-config
 
   # Silent conversion for automation
-  mirror-to-mkdocs --mirror-folder ./mirror \
-                   --output-folder ./site \
-                   --silent --write-config
+  convert-to-mkdocs --mirror-folder ./mirror \
+                    --output-folder ./site \
+                    --silent --write-config
 
 Note: This tool works best with mirrors created by mirror-site that include
 index files with metadata, but can also process any HTML file structure.
@@ -356,9 +355,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Convert raw website mirror into MkDocs-friendly structure",
         epilog="Examples:\n"
-               "  mirror-to-mkdocs --mirror-folder docs-mirror --output-folder mkdocs-site --write-config\n"
-               "  mirror-to-mkdocs --mirror-folder ./mirror --output-folder ./site --base-url https://example.com/\n"
-               "  mirror-to-mkdocs --mirror-folder site-mirror --output-folder my-docs --docs-subdir content",
+               "  convert-to-mkdocs --mirror-folder docs-mirror --output-folder mkdocs-site --write-config\n"
+               "  convert-to-mkdocs --mirror-folder ./mirror --output-folder ./site --base-url https://example.com/\n"
+               "  convert-to-mkdocs --mirror-folder site-mirror --output-folder my-docs --docs-subdir content",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument('--mirror-folder', required=True, help='Path to the raw mirror folder')

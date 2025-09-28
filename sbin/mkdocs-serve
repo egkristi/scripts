@@ -40,7 +40,7 @@ Examples:
                --install-deps \
                --silent
 
-Perfect companion to mirror-to-mkdocs for serving converted website mirrors
+Perfect companion to convert-to-mkdocs for serving converted website mirrors
 as local documentation sites.
 """
 from __future__ import annotations
