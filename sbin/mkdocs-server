@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.8"
-# dependencies = []
+# dependencies = [
+#     "mkdocs>=1.5.0",
+#     "mkdocs-material>=9.0.0",
+# ]
 # ///
 """
 Robust MkDocs development server wrapper.
@@ -11,9 +14,9 @@ automatic setup and dependency management. It ensures your MkDocs project
 is properly configured and starts a development server.
 
 Features:
+- Self-contained with inline dependencies (mkdocs, mkdocs-material)
 - Automatically creates minimal mkdocs.yml if missing
 - Creates placeholder docs/index.md if needed
-- Optionally installs MkDocs and Material theme via uv
 - Flexible host and port configuration
 - Works with any MkDocs project structure
 
@@ -22,13 +25,12 @@ Usage:
 
 Examples:
   # Serve a converted mirror site
-  mkdocs-server --project-root ./mkdocs-site --install-deps
+  mkdocs-server --project-root ./mkdocs-site
 
   # Serve with custom host and port
   mkdocs-server --project-root ./docs \
                --host 0.0.0.0 \
-               --port 8080 \
-               --install-deps
+               --port 8080
 
   # Serve with custom docs directory
   mkdocs-server --project-root ./my-project \
@@ -36,9 +38,7 @@ Examples:
                --theme readthedocs
 
   # Silent mode for automation
-  mkdocs-server --project-root ./site \
-               --install-deps \
-               --silent
+  mkdocs-server --project-root ./site --silent
 
 Perfect companion to convert-to-mkdocs for serving converted website mirrors
 as local documentation sites.
@@ -54,24 +54,9 @@ from typing import Optional
 
 
 def ensure_mkdocs_installed(install: bool, silent: bool) -> bool:
-    """Check if MkDocs is installed, optionally install it via uv."""
-    try:
-        import mkdocs  # noqa: F401
-        return True
-    except Exception:
-        if not install:
-            if not silent:
-                print("mkdocs is not installed. Re-run with --install-deps to auto-install (mkdocs, mkdocs-material).", file=sys.stderr)
-            return False
-        # Attempt to install via uv
-        if not silent:
-            print("Installing mkdocs and mkdocs-material via uv add ...")
-        try:
-            subprocess.run(["uv", "add", "mkdocs", "mkdocs-material"], check=True)
-            return True
-        except Exception as e:
-            print(f"Failed to install mkdocs: {e}", file=sys.stderr)
-            return False
+    """MkDocs is always available via inline dependencies."""
+    # With inline dependencies, mkdocs is always available
+    return True
 
 
 def write_minimal_mkdocs_yml(project_root: Path, docs_subdir: str, theme: str, silent: bool) -> None:
@@ -107,16 +92,18 @@ def serve(project_root: Path, host: str, port: int, silent: bool) -> int:
     """Start the MkDocs development server."""
     addr = f"{host}:{port}"
     
-    # Prefer local mkdocs script via PATH
+    # Use mkdocs directly - it's available via inline dependencies
     cmd = ["mkdocs", "serve", "-a", addr]
+    
     if not silent:
         print(f"Starting MkDocs server at http://{addr}")
         print("Press Ctrl+C to stop the server")
+    
     try:
         proc = subprocess.run(cmd, cwd=str(project_root))
         return proc.returncode
     except FileNotFoundError:
-        print("mkdocs executable not found on PATH. Ensure dependencies are installed.", file=sys.stderr)
+        print("mkdocs executable not found. This should not happen with inline dependencies.", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         if not silent:
@@ -126,9 +113,9 @@ def serve(project_root: Path, host: str, port: int, silent: bool) -> int:
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Serve a MkDocs site with automatic setup and dependency management",
+        description="Serve a MkDocs site with automatic setup and inline dependencies",
         epilog="Examples:\n"
-               "  mkdocs-server --project-root ./mkdocs-site --install-deps\n"
+               "  mkdocs-server --project-root ./mkdocs-site\n"
                "  mkdocs-server --project-root ./docs --host 0.0.0.0 --port 8080\n"
                "  mkdocs-server --project-root ./site --docs-subdir content --theme readthedocs",
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -141,8 +128,6 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                    help="Host to bind (default: 127.0.0.1)")
     p.add_argument("--port", type=int, default=8000, 
                    help="Port to bind (default: 8000)")
-    p.add_argument("--install-deps", action="store_true", 
-                   help="Install mkdocs and material theme if missing (via uv add)")
     p.add_argument("--theme", default="material", 
                    help="Theme name for mkdocs.yml when auto-generating (default: material)")
     p.add_argument("--silent", action="store_true", 
@@ -155,7 +140,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     project_root = Path(args.project_root).resolve()
     project_root.mkdir(parents=True, exist_ok=True)
 
-    if not ensure_mkdocs_installed(args.install_deps, args.silent):
+    # MkDocs is always available via inline dependencies
+    if not ensure_mkdocs_installed(False, args.silent):
         return 2
 
     # Create minimal mkdocs.yml and index.md if missing
