@@ -56,16 +56,17 @@ def create_mkdocs_config(docs_dir: Path, nav_structure: List[Dict], site_name: s
     config = f"""site_name: {site_name}
 site_description: {site_description}
 site_author: {site_author}
-site_url: ""
 
-# Repository
-repo_name: {site_name}
-edit_uri: ""
+# Repository (optional)
+# repo_url: https://github.com/username/repository
+# repo_name: GitHub
+
+# Documentation directory
+docs_dir: mkdocs
 
 # Navigation
 nav:
 """
-    
     def format_nav_item(item, indent=2):
         spaces = " " * indent
         if isinstance(item, dict):
@@ -407,7 +408,7 @@ def create_electron_files(target_dir: Path, site_name: str):
     }},
     "files": [
       "electron/**/*",
-      "docs/**/*",
+      "mkdocs/**/*",
       "mkdocs.yml",
       "pyproject.toml"
     ],
@@ -817,15 +818,15 @@ def main():
         shutil.rmtree(target_dir)
     
     target_dir.mkdir(parents=True)
-    docs_dir = target_dir / "docs"
+    mkdocs_dir = target_dir / "mkdocs"
     
     # Copy source files
-    copy_source_files(source_dir, docs_dir)
+    copy_source_files(source_dir, mkdocs_dir)
     
     # Create MkDocs configuration
     print("Creating MkDocs configuration...")
-    nav_structure = get_navigation_structure(docs_dir)
-    mkdocs_config = create_mkdocs_config(docs_dir, nav_structure, args.site_name, args.site_description, args.site_author)
+    nav_structure = get_navigation_structure(mkdocs_dir)
+    mkdocs_config = create_mkdocs_config(mkdocs_dir, nav_structure, args.site_name, args.site_description, args.site_author)
     (target_dir / "mkdocs.yml").write_text(mkdocs_config, encoding='utf-8')
     
     # Create supporting files
