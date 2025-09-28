@@ -349,7 +349,7 @@ class AppleDeveloperSetup:
             title="📋 Certificate Creation Steps"
         ))
         
-        if Confirm.ask("Open Apple Developer Portal now?", default=True):
+        if Confirm.ask("Open Apple Developer Portal now?", default=False):
             webbrowser.open(certificates_url)
             
         # Wait for user to complete the process
@@ -464,7 +464,7 @@ class AppleDeveloperSetup:
             console.print(f"❌ Error verifying certificate: {e}")
             return False
             
-    def create_config(self, user_info: Dict, identity: str, enabled: bool = False) -> Dict:
+    def create_config(self, user_info: Dict, identity: str, enabled: bool = True) -> Dict:
         """Create the Apple Developer configuration."""
         config = self.load_template_config()
         
