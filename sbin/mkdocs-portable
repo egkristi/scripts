@@ -43,6 +43,7 @@ Examples:
 Perfect for creating offline documentation that can be shared and run anywhere!
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -359,13 +360,28 @@ def create_electron_files(target_dir: Path, site_name: str):
             # Check if the identity is available for code signing
             if result.returncode == 0 and identity in result.stdout:
                 print(f"✅ Found valid code signing identity: {identity}")
+                print(f"🔑 Using private key: {apple_config.get('privateKeyPath', 'Not specified')}")
+                print(f"📋 Using credentials from: {apple_config.get('credentialsDirectory', 'Not specified')}")
+                
                 mac_config = f'''      "category": "public.app-category.education",
       "identity": "{identity}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false'''
+                
+                # Add notarization if enabled and configured
+                if apple_config.get('notarization', {}).get('enabled', False):
+                    if apple_config.get('appleId') and apple_config.get('appSpecificPassword'):
+                        print("🍎 Notarization enabled - apps will be notarized after signing")
+                        mac_config += f''',
+      "notarize": {{
+        "teamId": "{apple_config['teamId']}"
+      }}'''
+                    else:
+                        print("⚠️  Notarization enabled but missing Apple ID or app-specific password")
             else:
                 print(f"⚠️  Code signing identity not found in keychain: {identity}")
                 print("📝 Building without code signing (apps will still work but won't be signed)")
+                print("💡 Run 'apple-dev-setup' to fix certificate issues")
                 mac_config = '''      "category": "public.app-category.education",
       "identity": null,
       "hardenedRuntime": false,
@@ -380,6 +396,7 @@ def create_electron_files(target_dir: Path, site_name: str):
         
         # Only add entitlements if code signing is enabled (identity is not null)
         if apple_config.get('entitlements') and '"identity": null' not in mac_config:
+            print("📋 Adding macOS entitlements for signed application")
             # Create entitlements file
             entitlements_content = '''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -396,6 +413,7 @@ def create_electron_files(target_dir: Path, site_name: str):
             
             entitlements_file = target_dir / "entitlements.mac.plist"
             entitlements_file.write_text(entitlements_content)
+            print(f"✅ Created entitlements file: {entitlements_file}")
             mac_config += f''',
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist"'''
@@ -879,7 +897,17 @@ def main():
             
             # Build applications
             print("Building desktop applications...")
-            subprocess.run(["npm", "run", "build-all"], cwd=target_dir, check=True)
+            
+            # Set up environment for notarization if enabled
+            build_env = dict(os.environ)
+            apple_config = load_apple_developer_config()
+            if apple_config and apple_config.get('notarization', {}).get('enabled', False):
+                if apple_config.get('appleId') and apple_config.get('appSpecificPassword'):
+                    build_env['APPLE_ID'] = apple_config['appleId']
+                    build_env['APPLE_APP_SPECIFIC_PASSWORD'] = apple_config['appSpecificPassword']
+                    print("🍎 Notarization credentials configured")
+            
+            subprocess.run(["npm", "run", "build-all"], cwd=target_dir, check=True, env=build_env)
             
             print("✅ Desktop applications built successfully!")
             
