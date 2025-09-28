@@ -634,11 +634,11 @@ The desktop applications are not code signed by default. To enable code signing:
 2. Copy `apple-developer-config.template.json` to `apple-developer-config.json`
 3. Fill in your Apple Developer details:
    ```json
-   {
+   {{
      "enabled": true,
      "identity": "Developer ID Application: Your Name (TEAM_ID)",
      "teamId": "TEAM_ID"
-   }
+   }}
    ```
 4. Rebuild the applications
 
