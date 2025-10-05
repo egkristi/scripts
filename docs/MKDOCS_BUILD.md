@@ -8,12 +8,15 @@ Multi-target build system for MkDocs documentation with unified configuration.
 
 ## Key Features
 
-- ✅ **Multi-target builds** - mkdocs, site, electron from one config
+- ✅ **Multi-target builds** - mkdocs, site, site-zip, pdf, electron, go from one config
 - ✅ **Unified configuration** - Single JSON file replaces mkdocs.yml, version.json, build config
 - ✅ **Version management** - Built-in version tracking with auto-increment
 - ✅ **Dynamic mkdocs.yml** - Generated from unified config
 - ✅ **Electron apps** - Desktop application generation with cross-platform support
+- ✅ **Go binaries** - Self-contained static web server binaries
 - ✅ **Static sites** - Direct static website output
+- ✅ **Site archives** - Compressed zip archives for distribution
+- ✅ **PDF export** - Searchable PDF documentation (requires system dependencies)
 
 ## Installation
 
@@ -99,14 +102,79 @@ Create a `docs/mkdocs-build.json` file (stored with your documentation source):
 }
 ```
 
+## Build Targets
+
+### Available Targets
+
+| Target | Description | Output | Dependencies |
+|--------|-------------|--------|--------------|
+| `mkdocs` | Ephemeral build directory | `../mkdocs/` | None |
+| `site` | Static website | `../site/` | None |
+| `site-zip` | Compressed site archive | `../site-archives/*.zip` | None |
+| `pdf` | PDF documentation | `../pdf-archives/*.pdf` | **System libraries** |
+| `electron` | Desktop applications | `../desktop-app/dists/` | Node.js, npm |
+| `go` | Static server binaries | `../go-dists/` | Go compiler |
+| `all` | All enabled targets | Multiple | Varies |
+
+### PDF Target - System Dependencies
+
+The PDF target requires system libraries for WeasyPrint. These must be installed separately:
+
+#### macOS (Homebrew)
+```bash
+brew install pango cairo gdk-pixbuf libffi
+```
+
+#### Ubuntu/Debian
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    shared-mime-info
+```
+
+#### Fedora/RHEL/CentOS
+```bash
+sudo dnf install -y \
+    pango \
+    cairo \
+    gdk-pixbuf2 \
+    libffi-devel
+```
+
+#### Arch Linux
+```bash
+sudo pacman -S pango cairo gdk-pixbuf2 libffi
+```
+
+#### Windows
+Install GTK3 runtime from: https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer
+
+#### Verification
+After installing dependencies, verify WeasyPrint works:
+```bash
+python3 -c "from weasyprint import HTML; print('WeasyPrint OK')"
+```
+
+#### Alternative to PDF
+If system dependencies are too complex, use these alternatives:
+- **site-zip**: Compressed archive for distribution
+- **Browser Print**: Open site → Print → Save as PDF
+- **Go binaries**: Self-contained documentation server
+- **Electron apps**: Native desktop applications
+
 ## Command-Line Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--config` | Path to unified config file | **Required** |
-| `--target` | Target(s) to build (mkdocs, site, electron, all) | `mkdocs` |
+| `--target` | Target(s) to build (mkdocs, site, electron, go, pdf, all) | `mkdocs` |
 | `--electron-build` | Build Electron apps (override config) | `false` |
 | `--electron-platforms` | Platforms to build (mac,win,linux,all) | From config |
+| `--go-platforms` | Go platforms (darwin/amd64, linux/amd64, etc.) | From config |
 | `--list-targets` | List available targets and exit | - |
 | `--version` | Show version and exit | - |
 

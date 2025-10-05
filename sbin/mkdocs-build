@@ -4,6 +4,7 @@
 # dependencies = [
 #     "mkdocs>=1.5.0",
 #     "mkdocs-material>=9.4.0",
+#     "playwright>=1.40.0",
 # ]
 # ///
 """
@@ -87,6 +88,8 @@ class BuildTarget(Enum):
     MKDOCS = "mkdocs"
     SITE = "site"
     SITE_ZIP = "site-zip"
+    COMBINED_HTML = "combined-html"
+    PDF = "pdf"
     ELECTRON = "electron"
     GO = "go"
     ALL = "all"
@@ -194,6 +197,20 @@ class GoTargetConfig(TargetConfig):
 class SiteZipTargetConfig(TargetConfig):
     """Site zip archive target configuration."""
     pass
+
+
+@dataclass
+class CombinedHtmlTargetConfig(TargetConfig):
+    """Combined HTML target configuration."""
+    with_toc: bool = True
+    with_cover: bool = True
+
+
+@dataclass
+class PdfTargetConfig(TargetConfig):
+    """PDF target configuration."""
+    with_toc: bool = True
+    with_cover: bool = True
 
 
 @dataclass
@@ -319,6 +336,24 @@ def load_unified_config(config_path: Path) -> UnifiedConfig:
         targets['site-zip'] = SiteZipTargetConfig(
             enabled=site_zip_target.get('enabled', True),
             output_dir=site_zip_target.get('output_dir', '../site-archives')
+        )
+    
+    if 'combined-html' in targets_data:
+        combined_html_target = targets_data['combined-html']
+        targets['combined-html'] = CombinedHtmlTargetConfig(
+            enabled=combined_html_target.get('enabled', True),
+            output_dir=combined_html_target.get('output_dir', '../combined-html'),
+            with_toc=combined_html_target.get('with_toc', True),
+            with_cover=combined_html_target.get('with_cover', True)
+        )
+    
+    if 'pdf' in targets_data:
+        pdf_target = targets_data['pdf']
+        targets['pdf'] = PdfTargetConfig(
+            enabled=pdf_target.get('enabled', True),
+            output_dir=pdf_target.get('output_dir', '../pdf-archives'),
+            with_toc=pdf_target.get('with_toc', True),
+            with_cover=pdf_target.get('with_cover', True)
         )
     
     return UnifiedConfig(
@@ -1054,6 +1089,620 @@ def build_site_zip_target(config: UnifiedConfig, target_config: SiteZipTargetCon
     return True
 
 
+def build_combined_html_target(config: UnifiedConfig, target_config: CombinedHtmlTargetConfig) -> bool:
+    """Build combined HTML documentation target."""
+    config.log(f"\n=== Building Combined HTML Documentation ===", "📄")
+    
+    # First ensure the site is built
+    site_dir = config.config_dir / "../site"
+    if not site_dir.exists():
+        config.log("Site directory not found, building site first...", "")
+        if 'site' in config.targets:
+            site_config = config.targets['site']
+            if isinstance(site_config, SiteTargetConfig):
+                if not build_site_target(config, site_config):
+                    return False
+        else:
+            print(f"❌ Site target not configured", file=sys.stderr)
+            return False
+    
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    html_filename = f"{config.project.name.replace(' ', '_')}-{config.version.current}-combined.html"
+    html_path = output_dir / html_filename
+    
+    config.log("Building combined HTML...", "")
+    
+    try:
+        # Collect all HTML files from the site
+        html_files = []
+        for html_file in sorted(site_dir.rglob("*.html")):
+            if html_file.name not in ['404.html', 'search.html']:
+                html_files.append(html_file)
+        
+        config.log(f"Found {len(html_files)} pages to include", "")
+        
+        # Build combined HTML
+        combined_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{config.project.name} v{config.version.current}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        .cover-page {{
+            text-align: center;
+            padding: 100px 0;
+            border-bottom: 2px solid #eee;
+            margin-bottom: 50px;
+        }}
+        .cover-page h1 {{
+            font-size: 48px;
+            margin-bottom: 20px;
+        }}
+        .cover-page .version {{
+            font-size: 24px;
+            color: #666;
+            margin-bottom: 10px;
+        }}
+        .cover-page .description {{
+            font-size: 18px;
+            color: #888;
+            margin-bottom: 50px;
+        }}
+        .cover-page .author {{
+            font-size: 16px;
+            color: #666;
+        }}
+        .toc {{
+            border: 1px solid #eee;
+            padding: 30px;
+            margin-bottom: 50px;
+            background: #f9f9f9;
+        }}
+        .toc h2 {{
+            font-size: 32px;
+            margin-bottom: 30px;
+        }}
+        .toc ul {{
+            list-style: none;
+            padding-left: 0;
+        }}
+        .toc li {{
+            margin: 10px 0;
+            padding-left: 20px;
+        }}
+        .toc li.level-2 {{
+            padding-left: 40px;
+        }}
+        .toc a {{
+            color: #0066cc;
+            text-decoration: none;
+        }}
+        .toc a:hover {{
+            text-decoration: underline;
+        }}
+        .page-content {{
+            border-top: 2px solid #eee;
+            padding-top: 30px;
+            margin-top: 30px;
+        }}
+        h1 {{
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }}
+        h2 {{
+            color: #34495e;
+            margin-top: 30px;
+        }}
+        pre {{
+            background: #f6f8fa;
+            padding: 16px;
+            overflow-x: auto;
+            border-radius: 6px;
+            border: 1px solid #e1e4e8;
+        }}
+        code {{
+            background: #f6f8fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }}
+        th, td {{
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }}
+        th {{
+            background-color: #f6f8fa;
+            font-weight: 600;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+        }}
+        .back-to-top {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+        }}
+        .back-to-top:hover {{
+            background: #2980b9;
+        }}
+    </style>
+</head>
+<body>
+"""
+        
+        if target_config.with_cover:
+            combined_html += f"""    <!-- Cover Page -->
+    <div class="cover-page" id="top">
+        <h1>{config.project.name}</h1>
+        <div class="version">Version {config.version.current}</div>
+        <div class="description">{config.project.description}</div>
+        <div class="author">© {config.project.author}</div>
+        <div style="margin-top: 50px; color: #999;">
+            Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        </div>
+    </div>
+"""
+        
+        if target_config.with_toc:
+            combined_html += """    <!-- Table of Contents -->
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        <ul>
+"""
+            
+            # Add TOC entries with links
+            for idx, html_file in enumerate(html_files):
+                rel_path = html_file.relative_to(site_dir)
+                page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
+                if rel_path.parent != Path('.'):
+                    section = rel_path.parent.name
+                    combined_html += f'            <li class="level-2"><a href="#page-{idx}">{section} / {page_title}</a></li>\n'
+                else:
+                    combined_html += f'            <li><a href="#page-{idx}">{page_title}</a></li>\n'
+            
+            combined_html += """        </ul>
+    </div>
+"""
+        
+        combined_html += """    <!-- Page Content -->
+"""
+        
+        # Extract and combine content from each HTML file
+        from html.parser import HTMLParser
+        
+        class ContentExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.in_main = False
+                self.in_article = False
+                self.content = []
+                
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = dict(attrs)
+                if tag == 'main' or (tag == 'article' and attrs_dict.get('class', '').find('md-content') >= 0):
+                    self.in_main = True
+                    self.in_article = True
+                elif self.in_main:
+                    attr_str = ' '.join([f'{k}="{v}"' for k, v in attrs])
+                    self.content.append(f'<{tag} {attr_str}>' if attr_str else f'<{tag}>')
+                    
+            def handle_endtag(self, tag):
+                if tag == 'main' or (tag == 'article' and self.in_article):
+                    self.in_main = False
+                    self.in_article = False
+                elif self.in_main:
+                    self.content.append(f'</{tag}>')
+                    
+            def handle_data(self, data):
+                if self.in_main:
+                    self.content.append(data)
+        
+        for idx, html_file in enumerate(html_files):
+            try:
+                with open(html_file, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                
+                parser = ContentExtractor()
+                parser.feed(html_content)
+                
+                if parser.content:
+                    rel_path = html_file.relative_to(site_dir)
+                    page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
+                    combined_html += f'\n    <div class="page-content" id="page-{idx}">\n'
+                    combined_html += f'        <h1>{page_title}</h1>\n'
+                    combined_html += ''.join(parser.content)
+                    combined_html += '\n    </div>\n'
+            except Exception as e:
+                config.log(f"Warning: Could not process {html_file.name}: {e}", "⚠️")
+        
+        combined_html += """
+    <a href="#top" class="back-to-top">↑ Back to Top</a>
+</body>
+</html>
+"""
+        
+        # Write combined HTML
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(combined_html)
+        
+        size_mb = html_path.stat().st_size / (1024 * 1024)
+        config.log(f"Created {html_filename} ({size_mb:.1f}MB)", "✅")
+        
+    except Exception as e:
+        print(f"❌ Combined HTML generation failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return False
+    
+    config.log(f"Combined HTML ready: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
+    return True
+
+
+def build_pdf_target(config: UnifiedConfig, target_config: PdfTargetConfig) -> bool:
+    """Build PDF documentation target using Playwright."""
+    config.log(f"\n=== Building PDF Documentation ===", "📝")
+    
+    # First ensure the site is built
+    site_dir = config.config_dir / "../site"
+    if not site_dir.exists():
+        config.log("Site directory not found, building site first...", "")
+        if 'site' in config.targets:
+            site_config = config.targets['site']
+            if isinstance(site_config, SiteTargetConfig):
+                if not build_site_target(config, site_config):
+                    return False
+        else:
+            print(f"❌ Site target not configured", file=sys.stderr)
+            return False
+    
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    pdf_filename = f"{config.project.name.replace(' ', '_')}-{config.version.current}.pdf"
+    pdf_path = output_dir / pdf_filename
+    
+    config.log("Generating PDF with Playwright...", "")
+    
+    try:
+        # Use Playwright to generate PDF
+        from playwright.sync_api import sync_playwright
+        
+        config.log("Checking Playwright browsers...", "")
+        
+        # Try to launch browser, install if needed
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+                browser.close()
+                config.log("Playwright browsers ready", "✅")
+            except Exception as browser_error:
+                if "Executable doesn't exist" in str(browser_error):
+                    config.log("Installing Playwright browsers (one-time setup, ~170MB)...", "⏳")
+                    try:
+                        # Install Chromium browser
+                        install_result = subprocess.run(
+                            [sys.executable, "-m", "playwright", "install", "chromium"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300  # 5 minute timeout
+                        )
+                        if install_result.returncode != 0:
+                            print(f"❌ Failed to install Playwright browsers", file=sys.stderr)
+                            print(install_result.stderr, file=sys.stderr)
+                            return False
+                        config.log("Playwright browsers installed", "✅")
+                    except subprocess.TimeoutExpired:
+                        print(f"❌ Browser installation timed out", file=sys.stderr)
+                        return False
+                else:
+                    raise
+        
+        config.log("Building combined HTML for PDF...", "")
+        
+        # Create a combined HTML file with all pages
+        combined_html_path = output_dir / f"_combined_{config.version.current}.html"
+        
+        # Collect all HTML files from the site
+        html_files = []
+        for html_file in sorted(site_dir.rglob("*.html")):
+            if html_file.name not in ['404.html', 'search.html']:
+                html_files.append(html_file)
+        
+        config.log(f"Found {len(html_files)} pages to include", "")
+        
+        # Build combined HTML
+        combined_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{config.project.name} v{config.version.current}</title>
+    <style>
+        @page {{
+            margin: 20mm 15mm;
+            @top-center {{
+                content: "{config.project.name} v{config.version.current}";
+                font-size: 10px;
+                color: #666;
+            }}
+            @bottom-center {{
+                content: counter(page) " / " counter(pages);
+                font-size: 10px;
+                color: #666;
+            }}
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }}
+        .cover-page {{
+            page-break-after: always;
+            text-align: center;
+            padding-top: 200px;
+        }}
+        .cover-page h1 {{
+            font-size: 48px;
+            margin-bottom: 20px;
+        }}
+        .cover-page .version {{
+            font-size: 24px;
+            color: #666;
+            margin-bottom: 10px;
+        }}
+        .cover-page .description {{
+            font-size: 18px;
+            color: #888;
+            margin-bottom: 50px;
+        }}
+        .cover-page .author {{
+            font-size: 16px;
+            color: #666;
+        }}
+        .toc {{
+            page-break-after: always;
+        }}
+        .toc h1 {{
+            font-size: 32px;
+            margin-bottom: 30px;
+        }}
+        .toc ul {{
+            list-style: none;
+            padding-left: 0;
+        }}
+        .toc li {{
+            margin: 10px 0;
+            padding-left: 20px;
+        }}
+        .toc li.level-2 {{
+            padding-left: 40px;
+        }}
+        .page-content {{
+            page-break-before: always;
+        }}
+        h1 {{
+            page-break-before: always;
+            margin-top: 0;
+        }}
+        h1:first-of-type {{
+            page-break-before: avoid;
+        }}
+        pre {{
+            background: #f6f8fa;
+            padding: 16px;
+            overflow-x: auto;
+            border-radius: 6px;
+            page-break-inside: avoid;
+        }}
+        code {{
+            background: #f6f8fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            page-break-inside: avoid;
+        }}
+        th, td {{
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }}
+        th {{
+            background-color: #f6f8fa;
+        }}
+        img {{
+            max-width: 100%;
+            page-break-inside: avoid;
+        }}
+        @media print {{
+            a {{
+                color: #000;
+                text-decoration: none;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <!-- Cover Page -->
+    <div class="cover-page">
+        <h1>{config.project.name}</h1>
+        <div class="version">Version {config.version.current}</div>
+        <div class="description">{config.project.description}</div>
+        <div class="author">© {config.project.author}</div>
+        <div style="margin-top: 50px; color: #999;">
+            Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        </div>
+    </div>
+    
+    <!-- Table of Contents -->
+    <div class="toc">
+        <h1>Table of Contents</h1>
+        <ul>
+"""
+        
+        # Add TOC entries
+        for html_file in html_files:
+            rel_path = html_file.relative_to(site_dir)
+            page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
+            if rel_path.parent != Path('.'):
+                section = rel_path.parent.name
+                combined_html += f'            <li class="level-2">{section} / {page_title}</li>\n'
+            else:
+                combined_html += f'            <li>{page_title}</li>\n'
+        
+        combined_html += """        </ul>
+    </div>
+    
+    <!-- Page Content -->
+"""
+        
+        # Extract and combine content from each HTML file
+        from html.parser import HTMLParser
+        
+        class ContentExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.in_main = False
+                self.in_article = False
+                self.content = []
+                
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = dict(attrs)
+                if tag == 'main' or (tag == 'article' and attrs_dict.get('class', '').find('md-content') >= 0):
+                    self.in_main = True
+                    self.in_article = True
+                elif self.in_main:
+                    attr_str = ' '.join([f'{k}="{v}"' for k, v in attrs])
+                    self.content.append(f'<{tag} {attr_str}>' if attr_str else f'<{tag}>')
+                    
+            def handle_endtag(self, tag):
+                if tag == 'main' or (tag == 'article' and self.in_article):
+                    self.in_main = False
+                    self.in_article = False
+                elif self.in_main:
+                    self.content.append(f'</{tag}>')
+                    
+            def handle_data(self, data):
+                if self.in_main:
+                    self.content.append(data)
+        
+        for idx, html_file in enumerate(html_files):
+            try:
+                with open(html_file, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                
+                parser = ContentExtractor()
+                parser.feed(html_content)
+                
+                if parser.content:
+                    rel_path = html_file.relative_to(site_dir)
+                    combined_html += f'\n    <div class="page-content" id="page-{idx}">\n'
+                    combined_html += ''.join(parser.content)
+                    combined_html += '\n    </div>\n'
+            except Exception as e:
+                config.log(f"Warning: Could not process {html_file.name}: {e}", "⚠️")
+        
+        combined_html += """
+</body>
+</html>
+"""
+        
+        # Write combined HTML
+        with open(combined_html_path, 'w', encoding='utf-8') as f:
+            f.write(combined_html)
+        
+        config.log("Rendering PDF from combined HTML...", "")
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            
+            # Load the combined HTML
+            page.goto(f'file://{combined_html_path.resolve()}')
+            
+            # Wait for content to load (especially Mermaid diagrams)
+            page.wait_for_load_state('networkidle')
+            page.wait_for_timeout(3000)  # Extra time for Mermaid rendering
+            
+            # Generate PDF with options
+            page.pdf(
+                path=str(pdf_path),
+                format='A4',
+                print_background=True,
+                margin={
+                    'top': '20mm',
+                    'right': '15mm',
+                    'bottom': '20mm',
+                    'left': '15mm'
+                },
+                display_header_footer=True,
+                header_template=f'''
+                    <div style="font-size: 10px; width: 100%; text-align: center; color: #666;">
+                        {config.project.name} v{config.version.current}
+                    </div>
+                ''',
+                footer_template='''
+                    <div style="font-size: 10px; width: 100%; text-align: center; color: #666;">
+                        <span class="pageNumber"></span> / <span class="totalPages"></span>
+                    </div>
+                '''
+            )
+            
+            browser.close()
+        
+        # Clean up combined HTML
+        if combined_html_path.exists():
+            combined_html_path.unlink()
+        
+        # Check if PDF was created
+        pdf_path = output_dir / pdf_filename
+        if pdf_path.exists():
+            size_mb = pdf_path.stat().st_size / (1024 * 1024)
+            config.log(f"Created {pdf_filename} ({size_mb:.1f}MB)", "✅")
+        else:
+            print(f"❌ PDF file not found: {pdf_path}", file=sys.stderr)
+            return False
+        
+    except ImportError:
+        print(f"❌ Playwright not available. Run: playwright install chromium", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"❌ PDF generation failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return False
+    
+    config.log(f"PDF documentation ready: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
+    return True
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -1181,6 +1830,16 @@ def main() -> int:
             
             elif target_name == 'site-zip' and isinstance(target_config, SiteZipTargetConfig):
                 if not build_site_zip_target(config, target_config):
+                    success = False
+                    break
+            
+            elif target_name == 'combined-html' and isinstance(target_config, CombinedHtmlTargetConfig):
+                if not build_combined_html_target(config, target_config):
+                    success = False
+                    break
+            
+            elif target_name == 'pdf' and isinstance(target_config, PdfTargetConfig):
+                if not build_pdf_target(config, target_config):
                     success = False
                     break
         
