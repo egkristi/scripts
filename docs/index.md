@@ -11,12 +11,23 @@ Welcome to the comprehensive documentation for the scripts toolkit - a collectio
 
 ## Available Tools
 
+### Website Mirroring & Conversion
+
 * **`mirror-site`** - Mirror websites with intelligent link rewriting and metadata
 * **`convert-to-mkdocs`** - Convert website mirrors to MkDocs documentation sites  
-* **`mkdocs-server`** - Robust MkDocs development server with auto-setup
-* **`mkdocs-portable`** - Create portable, self-contained documentation sites
-* **`mkdocs-test`** - Test and validate portable documentation sites
 * **`cat-folder`** - File analysis and content concatenation utility
+
+### MkDocs Build & Development
+
+* **`mkdocs-build`** - Build MkDocs documentation with ephemeral build directories
+* **`mkdocs-server`** - Robust MkDocs development server with auto-setup
+* **`mkdocs-update-asset`** - Update JavaScript/CSS assets (Mermaid, MathJax, etc.)
+
+### Portable Documentation
+
+* **`mkdocs-portable`** - Create portable, self-contained documentation sites with Electron
+* **`mkdocs-portable-test`** - Test and validate portable MkDocs desktop applications
+* **`mkdocs-test`** - Test and validate portable documentation sites
 
 ## Getting Started
 
