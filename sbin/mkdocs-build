@@ -1,0 +1,348 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.8"
+# dependencies = []
+# ///
+"""
+Build MkDocs documentation from a primary source directory.
+
+This tool creates an ephemeral MkDocs build directory by syncing content from
+a primary documentation source. The build directory can be safely deleted and
+regenerated at any time.
+
+Features:
+- Syncs markdown files from source to ephemeral build directory
+- Copies static assets (CSS, JS, fonts, etc.)
+- Rebuilds build directory from scratch on each run
+- Configurable via command-line or config file
+- Runs mkdocs build automatically
+
+Usage:
+  build-mkdocs [--config CONFIG] [--source-dir DIR] [--build-dir DIR] \
+               [--mkdocs-config FILE] [--no-build] [--clean-only]
+
+Examples:
+  # Build with default structure (docs/ -> mkdocs/docs/)
+  build-mkdocs
+
+  # Custom source and build directories
+  build-mkdocs --source-dir documentation --build-dir .mkdocs-build
+
+  # Just clean the build directory without rebuilding
+  build-mkdocs --clean-only
+
+  # Sync files but don't run mkdocs build
+  build-mkdocs --no-build
+
+  # Use a config file
+  build-mkdocs --config build-config.json
+
+Config File Format (JSON):
+  {
+    "source_dir": "docs",
+    "build_dir": "mkdocs",
+    "docs_subdir": "docs",
+    "mkdocs_config": "mkdocs.yml",
+    "root_files": ["README.md", "LICENSE.md"],
+    "content_dirs": ["ARCHITECTURE", "BUSINESS", "DEVELOPMENT"],
+    "assets_dir": ".mkdocs-assets",
+    "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+  }
+
+Note: The build directory is ephemeral and should be added to .gitignore.
+All source content should be maintained in the primary source directory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional
+
+
+@dataclass
+class BuildConfig:
+    """Configuration for MkDocs build process."""
+    project_root: Path
+    source_dir: Path
+    build_dir: Path
+    docs_subdir: str = "docs"
+    mkdocs_config: Optional[Path] = None
+    root_files: List[str] = field(default_factory=lambda: ["README.md", "LICENSE.md"])
+    content_dirs: List[str] = field(default_factory=list)
+    assets_dir: str = ".mkdocs-assets"
+    asset_subdirs: List[str] = field(default_factory=lambda: ["assets", "javascripts", "stylesheets"])
+    silent: bool = False
+    no_build: bool = False
+    clean_only: bool = False
+
+    @property
+    def build_docs_dir(self) -> Path:
+        """Full path to the docs directory inside build_dir."""
+        return self.build_dir / self.docs_subdir
+
+    @property
+    def assets_source_dir(self) -> Path:
+        """Full path to the assets source directory."""
+        return self.source_dir / self.assets_dir
+
+    def log(self, msg: str, emoji: str = "ℹ️") -> None:
+        """Print a log message unless silent mode is enabled."""
+        if not self.silent:
+            print(f"{emoji}  {msg}")
+
+
+def load_config_file(config_path: Path, project_root: Path) -> dict:
+    """Load configuration from a JSON file."""
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+        return config_data
+    except Exception as e:
+        print(f"❌ Error loading config file {config_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def auto_detect_content_dirs(source_dir: Path) -> List[str]:
+    """Auto-detect content directories in the source directory."""
+    content_dirs = []
+    if not source_dir.exists():
+        return content_dirs
+    
+    # Look for directories with markdown files (excluding hidden dirs and assets)
+    for item in source_dir.iterdir():
+        if item.is_dir() and not item.name.startswith('.'):
+            # Check if directory contains markdown files
+            if any(item.rglob('*.md')):
+                content_dirs.append(item.name)
+    
+    return sorted(content_dirs)
+
+
+def clean_build_dir(config: BuildConfig) -> None:
+    """Remove the entire build directory."""
+    if config.build_dir.exists():
+        config.log(f"Removing existing {config.build_dir.name}/ directory...", "🗑️")
+        shutil.rmtree(config.build_dir)
+        config.log(f"Cleaned {config.build_dir.name}/", "✓")
+
+
+def create_build_structure(config: BuildConfig) -> None:
+    """Create the build directory structure."""
+    config.build_docs_dir.mkdir(parents=True, exist_ok=True)
+    config.log(f"Created fresh {config.build_docs_dir.relative_to(config.project_root)}/", "📁")
+
+
+def sync_root_files(config: BuildConfig) -> None:
+    """Sync root-level files to the build directory."""
+    for filename in config.root_files:
+        src = config.project_root / filename
+        dst = config.build_docs_dir / filename
+        
+        if src.exists():
+            shutil.copy2(src, dst)
+            config.log(f"Synced {filename}", "📄")
+
+
+def sync_content_dirs(config: BuildConfig) -> None:
+    """Sync content directories from source to build."""
+    dirs_to_sync = config.content_dirs
+    
+    # Auto-detect if no content dirs specified
+    if not dirs_to_sync:
+        dirs_to_sync = auto_detect_content_dirs(config.source_dir)
+        if dirs_to_sync:
+            config.log(f"Auto-detected content directories: {', '.join(dirs_to_sync)}", "🔍")
+    
+    for dir_name in dirs_to_sync:
+        src_dir = config.source_dir / dir_name
+        dst_dir = config.build_docs_dir / dir_name
+        
+        if src_dir.exists() and src_dir.is_dir():
+            shutil.copytree(src_dir, dst_dir)
+            config.log(f"Synced {dir_name}/ directory", "📁")
+
+
+def sync_assets(config: BuildConfig) -> None:
+    """Sync static assets from source to build."""
+    if not config.assets_source_dir.exists():
+        return
+    
+    for asset_subdir in config.asset_subdirs:
+        src_asset = config.assets_source_dir / asset_subdir
+        dst_asset = config.build_docs_dir / asset_subdir
+        
+        if src_asset.exists() and src_asset.is_dir():
+            shutil.copytree(src_asset, dst_asset)
+            config.log(f"Synced {asset_subdir}/ assets", "🎨")
+
+
+def rebuild_build_dir(config: BuildConfig) -> None:
+    """Rebuild the ephemeral build directory from scratch."""
+    config.log("Rebuilding build directory...", "🔄")
+    
+    # Clean existing build
+    clean_build_dir(config)
+    
+    # Create structure
+    create_build_structure(config)
+    
+    # Sync content
+    sync_root_files(config)
+    sync_content_dirs(config)
+    sync_assets(config)
+    
+    config.log("Build directory ready", "✓")
+
+
+def run_mkdocs_build(config: BuildConfig) -> None:
+    """Run mkdocs build command."""
+    if config.no_build:
+        config.log("Skipping mkdocs build (--no-build)", "⏭️")
+        return
+    
+    config.log("Building MkDocs site...", "🏗️")
+    
+    cmd = ["mkdocs", "build", "--clean"]
+    
+    if config.mkdocs_config:
+        cmd.extend(["--config-file", str(config.mkdocs_config)])
+    
+    try:
+        subprocess.run(cmd, check=True, cwd=config.project_root)
+        config.log("Documentation built successfully!", "✅")
+        config.log("Output directory: site/", "📁")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error building documentation: {e}", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError:
+        print("❌ mkdocs command not found. Install with: uv pip install mkdocs mkdocs-material", file=sys.stderr)
+        sys.exit(1)
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Build MkDocs documentation from a primary source directory",
+        epilog="Examples:\n"
+               "  build-mkdocs\n"
+               "  build-mkdocs --source-dir documentation --build-dir .build\n"
+               "  build-mkdocs --config build-config.json\n"
+               "  build-mkdocs --clean-only\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=Path,
+        help='Path to JSON config file'
+    )
+    parser.add_argument(
+        '--source-dir',
+        type=Path,
+        default=Path('docs'),
+        help='Primary documentation source directory (default: docs)'
+    )
+    parser.add_argument(
+        '--build-dir',
+        type=Path,
+        default=Path('mkdocs'),
+        help='Ephemeral build directory (default: mkdocs)'
+    )
+    parser.add_argument(
+        '--docs-subdir',
+        default='docs',
+        help='Subdirectory name for docs inside build-dir (default: docs)'
+    )
+    parser.add_argument(
+        '--mkdocs-config',
+        type=Path,
+        help='Path to mkdocs.yml config file (default: mkdocs.yml in project root)'
+    )
+    parser.add_argument(
+        '--no-build',
+        action='store_true',
+        help='Sync files but do not run mkdocs build'
+    )
+    parser.add_argument(
+        '--clean-only',
+        action='store_true',
+        help='Only clean the build directory without rebuilding'
+    )
+    parser.add_argument(
+        '--silent',
+        action='store_true',
+        help='Suppress progress output'
+    )
+    
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Main entry point."""
+    args = parse_args()
+    
+    # Determine project root (current working directory)
+    project_root = Path.cwd()
+    
+    # Load config from file if provided
+    config_data = {}
+    if args.config:
+        config_data = load_config_file(args.config, project_root)
+    
+    # Build configuration (CLI args override config file)
+    source_dir = project_root / (args.source_dir or config_data.get('source_dir', 'docs'))
+    build_dir = project_root / (args.build_dir or config_data.get('build_dir', 'mkdocs'))
+    
+    # Resolve mkdocs config path
+    mkdocs_config = args.mkdocs_config or config_data.get('mkdocs_config')
+    if mkdocs_config:
+        mkdocs_config = project_root / mkdocs_config
+    else:
+        # Default to mkdocs.yml in project root if it exists
+        default_config = project_root / 'mkdocs.yml'
+        if default_config.exists():
+            mkdocs_config = default_config
+    
+    config = BuildConfig(
+        project_root=project_root,
+        source_dir=source_dir,
+        build_dir=build_dir,
+        docs_subdir=args.docs_subdir or config_data.get('docs_subdir', 'docs'),
+        mkdocs_config=mkdocs_config,
+        root_files=config_data.get('root_files', ["README.md", "LICENSE.md"]),
+        content_dirs=config_data.get('content_dirs', []),
+        assets_dir=config_data.get('assets_dir', '.mkdocs-assets'),
+        asset_subdirs=config_data.get('asset_subdirs', ["assets", "javascripts", "stylesheets"]),
+        silent=args.silent,
+        no_build=args.no_build,
+        clean_only=args.clean_only,
+    )
+    
+    # Validate source directory exists
+    if not config.source_dir.exists():
+        print(f"❌ Source directory does not exist: {config.source_dir}", file=sys.stderr)
+        return 1
+    
+    # Clean only mode
+    if config.clean_only:
+        clean_build_dir(config)
+        return 0
+    
+    # Rebuild and optionally build
+    try:
+        rebuild_build_dir(config)
+        run_mkdocs_build(config)
+        return 0
+    except Exception as e:
+        print(f"❌ Error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
