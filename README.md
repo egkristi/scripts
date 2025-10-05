@@ -1,214 +1,133 @@
-# Various Scripts
+# Scripts - System Binaries
 
-## Overview
+Generic, reusable scripts for documentation and development workflows.
 
-The scripts, located in the `sbin/` directory, are various utility scripts to make life easier.
+## Available Scripts
 
-## Quick Start
+### `mkdocs-build`
 
-**Requirements:** uv package manager (handles Python and dependencies automatically)
+Build MkDocs documentation from a primary source directory with ephemeral build folder support.
 
-**Quick setup:**
+**Purpose**: Creates an ephemeral MkDocs build directory by syncing content from a primary documentation source. The build directory can be safely deleted and regenerated at any time.
+
+**Usage**:
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/egkristi/shell-scripts/refs/heads/main/init.sh)"
+# Use with config file
+uv run scripts/sbin/mkdocs-build --config mkdocs-build.json
+
+# Use with command-line arguments
+uv run scripts/sbin/mkdocs-build --source-dir docs --build-dir mkdocs
+
+# Clean only (remove build directory)
+uv run scripts/sbin/mkdocs-build --clean-only
+
+# Sync files without running mkdocs build
+uv run scripts/sbin/mkdocs-build --no-build
 ```
 
-**📋 For detailed installation instructions, see [INSTALL.md](INSTALL.md)**
-
-# shell-scripts
-
-## cat-folder
-A script to concatenate and display the contents of files in a specified folder.
-- Supports filtering by file extensions and verbose output.
-- Usage: `cat-folder [options] [directory]`
-- Options:
-  - `-i EXTENSIONS`: Include only files with specified extensions (comma-separated).
-  - `-e EXTENSIONS`: Exclude files with specified extensions (comma-separated).
-  - `-d DIRECTORY`: Specify target directory (alternative to providing it as last argument).
-  - `-v`: Verbose mode (show skipped files).
-  - `-h`: Show help message.
-
-## mirror-site
-General-purpose website mirroring tool with intelligent link rewriting.
-- **Language:** Python (uses uv for dependency management)
-- **Dependencies:** Automatically managed (chardet for encoding detection)
-- **Requirements:** uv package manager only
-
-**Features:**
-- Crawls websites recursively with configurable depth limits
-- Downloads HTML pages and assets (images, CSS, JS, PDFs, etc.)
-- Rewrites internal links to work offline
-- Respects robots.txt and implements polite crawling delays
-- Generates comprehensive indexes (JSON and Markdown)
-- Supports incremental updates and resume functionality
-- Concurrent asset downloading for performance
-- Extensive filtering and customization options
-
-**Usage:** `mirror-site --website-url URL --target-folder DIR [options]`
-
-**Examples:**
-```bash
-# Mirror a documentation site
-mirror-site --website-url https://docs.example.com/ \
-            --target-folder ./mirror \
-            --same-domain --post-process
-
-# Quick single-page download  
-mirror-site --website-url https://site.com/page.html \
-            --target-folder ./page \
-            --link-depth 0
-
-# Deep crawl with filtering
-mirror-site --website-url https://site.com/ \
-            --target-folder ./site \
-            --include '/docs/' \
-            --exclude '/admin/' \
-            --max-pages 500
+**Config File Example** (`mkdocs-build.json`):
+```json
+{
+  "source_dir": "docs",
+  "build_dir": "mkdocs",
+  "docs_subdir": "docs",
+  "mkdocs_config": "mkdocs.yml",
+  "root_files": ["README.md", "LICENSE.md"],
+  "content_dirs": ["ARCHITECTURE", "BUSINESS", "DEVELOPMENT"],
+  "assets_dir": ".mkdocs-assets",
+  "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+}
 ```
 
-**Note:** Uses uv's inline dependencies - no manual package installation required!
+**Features**:
+- Rebuilds build directory from scratch on each run
+- Auto-detects content directories if not specified
+- Copies static assets (CSS, JS, fonts, etc.)
+- Runs `mkdocs build` automatically
+- Configurable via CLI or JSON config file
 
-## convert-to-mkdocs
-Convert raw website mirrors into MkDocs-friendly documentation sites.
-- **Language:** Python (uses uv for dependency management)
-- **Dependencies:** None (uses only Python standard library)
-- **Requirements:** uv package manager only
+---
 
-**Features:**
-- Converts mirrored HTML pages to Markdown with embedded HTML
-- Preserves page titles and navigation structure
-- Rewrites internal links for offline browsing
-- Copies assets to appropriate locations
-- Generates MkDocs configuration automatically
-- Works with mirror-site output or any HTML file structure
+### `mkdocs-server`
 
-**Usage:** `convert-to-mkdocs --mirror-folder MIRROR --output-folder OUTPUT [options]`
+Serve MkDocs documentation with automatic setup and dependency management.
 
-**Examples:**
+**Purpose**: Provides a convenient development server for MkDocs projects with automatic configuration and inline dependencies.
+
+**Usage**:
 ```bash
-# Convert a mirrored documentation site
-convert-to-mkdocs --mirror-folder docs-mirror \
-                  --output-folder mkdocs-site \
-                  --base-url https://docs.example.com/ \
-                  --write-config
+# Serve current project
+uv run scripts/sbin/mkdocs-server --project-root .
 
-# Convert with custom structure
-convert-to-mkdocs --mirror-folder site-mirror \
-                  --output-folder my-docs \
-                  --docs-subdir content \
-                  --write-config
+# Custom host and port
+uv run scripts/sbin/mkdocs-server --project-root . --host 0.0.0.0 --port 8080
 
-# Silent conversion for automation
-convert-to-mkdocs --mirror-folder ./mirror \
-                  --output-folder ./site \
-                  --silent --write-config
+# Serve with custom docs directory
+uv run scripts/sbin/mkdocs-server --project-root . --docs-subdir content
+
+# Silent mode
+uv run scripts/sbin/mkdocs-server --project-root . --silent
 ```
 
-**Note:** Works perfectly with mirror-site output that includes metadata!
-
-## mkdocs-server
-Robust MkDocs development server wrapper with automatic setup.
-- **Language:** Python (uses uv for dependency management)
-- **Dependencies:** None (optionally installs mkdocs and mkdocs-material via uv)
-- **Requirements:** uv package manager only
-
-**Features:**
+**Features**:
+- Self-contained with inline dependencies (mkdocs, mkdocs-material)
 - Automatically creates minimal mkdocs.yml if missing
 - Creates placeholder docs/index.md if needed
-- Optionally installs MkDocs and Material theme via uv
 - Flexible host and port configuration
 - Works with any MkDocs project structure
 
-**Usage:** `mkdocs-server --project-root PROJECT_DIR [options]`
+---
 
-**Examples:**
+### `convert-to-mkdocs`
+
+Convert mirrored HTML websites into MkDocs-compatible documentation.
+
+**Purpose**: Transforms mirrored websites (created by `mirror-site` or similar tools) into properly structured MkDocs documentation sites.
+
+**Usage**:
 ```bash
-# Serve a converted mirror site
-mkdocs-server --project-root ./mkdocs-site --install-deps
+# Convert a mirrored site
+uv run scripts/sbin/convert-to-mkdocs \
+  --mirror-folder docs-mirror \
+  --output-folder mkdocs-site \
+  --base-url https://docs.example.com/ \
+  --write-config
 
-# Serve with custom host and port
-mkdocs-server --project-root ./docs \
-              --host 0.0.0.0 \
-              --port 8080 \
-              --install-deps
-
-# Serve with custom docs directory
-mkdocs-server --project-root ./my-project \
-              --docs-subdir content \
-              --theme readthedocs
-
-# Silent mode for automation
-mkdocs-server --project-root ./site \
-              --install-deps \
-              --silent
+# Create portable MkDocs project
+uv run scripts/sbin/convert-to-mkdocs \
+  --mirror-folder ./mirror \
+  --output-folder ./site \
+  --with-portable \
+  --write-config
 ```
 
-**Note:** Perfect companion to convert-to-mkdocs for serving converted website mirrors!
+**Features**:
+- Converts HTML pages to Markdown with embedded HTML
+- Rewrites internal links for offline browsing
+- Generates MkDocs configuration automatically
+- Creates portable projects with run scripts
+- Supports mirror index files for metadata
 
-## mkdocs-portable
-Create portable, self-contained MkDocs documentation sites.
-- **Language:** Python (uses uv for dependency management)
-- **Dependencies:** None (uses only Python standard library)
-- **Requirements:** uv package manager only
+---
 
-**Features:**
-- Creates portable MkDocs sites with cross-platform run scripts
-- Generates automatic navigation from file structure
-- Optional Electron desktop application support
-- Self-contained with uv dependency management
-- Works with any collection of markdown files
+## Integration
 
-**Usage:** `mkdocs-portable --source-folder SOURCE --target-folder TARGET [options]`
+These scripts are designed to be used as a git submodule in your projects:
 
-**Examples:**
 ```bash
-# Create basic portable site
-mkdocs-portable --source-folder docs --target-folder portable_docs
+# Add as submodule
+git submodule add https://github.com/egkristi/scripts.git scripts
 
-# Create with custom site information
-mkdocs-portable --source-folder studyguide \
-                --target-folder my_docs \
-                --site-name "My Documentation" \
-                --site-description "Comprehensive guide"
-
-# Create with Electron desktop app files
-mkdocs-portable --source-folder docs \
-                --target-folder portable_docs \
-                --with-electron
-
-# Create and build desktop applications automatically
-mkdocs-portable --source-folder docs \
-                --target-folder portable_docs \
-                --build-electron
+# Initialize in existing repo
+git submodule update --init --recursive
 ```
 
-**Note:** Perfect for creating offline documentation that can be shared and run anywhere!
+## Requirements
 
-## mkdocs-test
-Test and validate portable MkDocs sites.
-- **Language:** Python (uses uv for dependency management)
-- **Dependencies:** None (uses only Python standard library)
-- **Requirements:** uv package manager only
+- Python 3.8+
+- [uv](https://docs.astral.sh/uv/) package manager
+- MkDocs and plugins (installed via project dependencies)
 
-**Features:**
-- Validates portable site structure and required files
-- Tests MkDocs configuration validity
-- Checks run scripts and permissions
-- Validates Electron application files (if present)
-- Provides detailed status reporting
+## License
 
-**Usage:** `mkdocs-test --target-folder TARGET_FOLDER [options]`
-
-**Examples:**
-```bash
-# Test a portable site
-mkdocs-test --target-folder portable_docs
-
-# Test with verbose output
-mkdocs-test --target-folder my_docs --verbose
-
-# Test specific components only
-mkdocs-test --target-folder docs --check-files-only
-```
-
-**Note:** Essential for validating portable documentation before distribution!
+See the main repository LICENSE file.
