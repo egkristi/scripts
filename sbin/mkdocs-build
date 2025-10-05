@@ -324,10 +324,73 @@ def generate_mkdocs_yml(config: UnifiedConfig, output_path: Path) -> None:
                 content_dirs.append(item.name)
         content_dirs = sorted(content_dirs)
     
-    # Build navigation structure
+    # Build navigation structure with all files
+    def build_nav_for_dir(base_path: Path, dir_name: str, indent: int = 2) -> List[str]:
+        """Recursively build navigation entries for a directory."""
+        nav_lines = []
+        dir_path = base_path / dir_name
+        
+        if not dir_path.exists() or not dir_path.is_dir():
+            return nav_lines
+        
+        # Collect all markdown files and subdirectories
+        md_files = []
+        subdirs = []
+        
+        for item in sorted(dir_path.iterdir()):
+            if item.is_file() and item.suffix == '.md':
+                md_files.append(item.name)
+            elif item.is_dir() and not item.name.startswith('.'):
+                # Check if subdir has markdown files
+                if any(item.rglob('*.md')):
+                    subdirs.append(item.name)
+        
+        # Start with section header
+        spaces = " " * indent
+        
+        # If README.md exists, use it as the section index
+        if 'README.md' in md_files:
+            nav_lines.append(f"{spaces}- {dir_name}:")
+            nav_lines.append(f"{spaces}  - Overview: {dir_name}/README.md")
+            md_files.remove('README.md')
+        else:
+            nav_lines.append(f"{spaces}- {dir_name}:")
+        
+        # Add other markdown files in this directory
+        for md_file in md_files:
+            # Create a nice title from filename
+            title = md_file.replace('.md', '').replace('_', ' ').replace('-', ' ')
+            nav_lines.append(f"{spaces}  - {title}: {dir_name}/{md_file}")
+        
+        # Add subdirectories recursively
+        for subdir in subdirs:
+            subdir_path = dir_path / subdir
+            sub_md_files = list(subdir_path.glob('*.md'))
+            
+            if sub_md_files:
+                # Check if subdir has README.md
+                readme_path = subdir_path / 'README.md'
+                if readme_path.exists():
+                    nav_lines.append(f"{spaces}  - {subdir}:")
+                    nav_lines.append(f"{spaces}    - Overview: {dir_name}/{subdir}/README.md")
+                    # Add other files in subdir
+                    for md_file in sorted(subdir_path.glob('*.md')):
+                        if md_file.name != 'README.md':
+                            title = md_file.stem.replace('_', ' ').replace('-', ' ')
+                            nav_lines.append(f"{spaces}    - {title}: {dir_name}/{subdir}/{md_file.name}")
+                else:
+                    # No README, just list files under subdir name
+                    nav_lines.append(f"{spaces}  - {subdir}:")
+                    for md_file in sorted(subdir_path.glob('*.md')):
+                        title = md_file.stem.replace('_', ' ').replace('-', ' ')
+                        nav_lines.append(f"{spaces}    - {title}: {dir_name}/{subdir}/{md_file.name}")
+        
+        return nav_lines
+    
+    # Build complete navigation
     nav_items = []
     for dir_name in content_dirs:
-        nav_items.append(f"  - {dir_name}: {dir_name}/")
+        nav_items.extend(build_nav_for_dir(config.source_dir, dir_name))
     
     nav_section = "\n".join(nav_items) if nav_items else "  - Home: index.md"
     
