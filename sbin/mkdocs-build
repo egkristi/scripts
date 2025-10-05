@@ -204,6 +204,7 @@ class CombinedHtmlTargetConfig(TargetConfig):
     """Combined HTML target configuration."""
     with_toc: bool = True
     with_cover: bool = True
+    toc_levels: int = 2
 
 
 @dataclass
@@ -211,6 +212,7 @@ class PdfTargetConfig(TargetConfig):
     """PDF target configuration."""
     with_toc: bool = True
     with_cover: bool = True
+    toc_levels: int = 2
 
 
 @dataclass
@@ -344,7 +346,8 @@ def load_unified_config(config_path: Path) -> UnifiedConfig:
             enabled=combined_html_target.get('enabled', True),
             output_dir=combined_html_target.get('output_dir', '../combined-html'),
             with_toc=combined_html_target.get('with_toc', True),
-            with_cover=combined_html_target.get('with_cover', True)
+            with_cover=combined_html_target.get('with_cover', True),
+            toc_levels=combined_html_target.get('toc_levels', 2)
         )
     
     if 'pdf' in targets_data:
@@ -353,7 +356,8 @@ def load_unified_config(config_path: Path) -> UnifiedConfig:
             enabled=pdf_target.get('enabled', True),
             output_dir=pdf_target.get('output_dir', '../pdf-archives'),
             with_toc=pdf_target.get('with_toc', True),
-            with_cover=pdf_target.get('with_cover', True)
+            with_cover=pdf_target.get('with_cover', True),
+            toc_levels=pdf_target.get('toc_levels', 2)
         )
     
     return UnifiedConfig(
@@ -1116,10 +1120,34 @@ def build_combined_html_target(config: UnifiedConfig, target_config: CombinedHtm
     config.log("Building combined HTML...", "")
     
     try:
-        # Collect all HTML files from the site
+        # Build navigation order from content directories
         html_files = []
+        
+        # Start with index.html if it exists
+        index_file = site_dir / "index.html"
+        if index_file.exists():
+            html_files.append(index_file)
+        
+        # Then add files in the order of content_dirs
+        content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
+        for dir_name in content_dirs:
+            section_dir = site_dir / dir_name
+            if section_dir.exists() and section_dir.is_dir():
+                # Add section index first
+                section_index = section_dir / "index.html"
+                if section_index.exists():
+                    html_files.append(section_index)
+                
+                # Then add all other pages in this section (sorted)
+                for html_file in sorted(section_dir.rglob("*.html")):
+                    if html_file != section_index and html_file.name not in ['404.html', 'search.html']:
+                        html_files.append(html_file)
+        
+        # Add any remaining HTML files not in content dirs
         for html_file in sorted(site_dir.rglob("*.html")):
-            if html_file.name not in ['404.html', 'search.html']:
+            if (html_file not in html_files and 
+                html_file.name not in ['404.html', 'search.html'] and
+                html_file != index_file):
                 html_files.append(html_file)
         
         config.log(f"Found {len(html_files)} pages to include", "")
@@ -1164,31 +1192,89 @@ def build_combined_html_target(config: UnifiedConfig, target_config: CombinedHtm
             color: #666;
         }}
         .toc {{
-            border: 1px solid #eee;
-            padding: 30px;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 40px;
             margin-bottom: 50px;
-            background: #f9f9f9;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
         .toc h2 {{
-            font-size: 32px;
+            font-size: 36px;
             margin-bottom: 30px;
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 15px;
         }}
         .toc ul {{
             list-style: none;
             padding-left: 0;
         }}
         .toc li {{
-            margin: 10px 0;
-            padding-left: 20px;
+            margin: 4px 0;
+            padding-left: 0;
+            line-height: 1.4;
+        }}
+        .toc li.level-1 {{
+            font-weight: 600;
+            font-size: 15px;
+            margin-top: 8px;
+            padding-left: 0;
+        }}
+        .toc li.level-1.section-header {{
+            font-weight: 700;
+            font-size: 16px;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            color: #2c3e50;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .toc li.level-1.section-header::before {{
+            content: "📁 ";
+            margin-right: 8px;
         }}
         .toc li.level-2 {{
+            padding-left: 20px;
+            font-size: 13px;
+            color: #555;
+        }}
+        .toc li.level-3 {{
             padding-left: 40px;
+            font-size: 12px;
+            color: #666;
+        }}
+        .toc li.level-4 {{
+            padding-left: 60px;
+            font-size: 11px;
+            color: #777;
+        }}
+        .toc li.level-1::before {{
+            content: "📄 ";
+            margin-right: 8px;
+        }}
+        .toc li.level-2::before {{
+            content: "▸ ";
+            margin-right: 6px;
+            color: #3498db;
+        }}
+        .toc li.level-3::before {{
+            content: "· ";
+            margin-right: 6px;
+            color: #95a5a6;
+        }}
+        .toc li.level-4::before {{
+            content: "- ";
+            margin-right: 6px;
+            color: #bdc3c7;
         }}
         .toc a {{
-            color: #0066cc;
+            color: #2c3e50;
             text-decoration: none;
+            transition: color 0.2s;
         }}
         .toc a:hover {{
+            color: #3498db;
             text-decoration: underline;
         }}
         .page-content {{
@@ -1250,6 +1336,24 @@ def build_combined_html_target(config: UnifiedConfig, target_config: CombinedHtm
             background: #2980b9;
         }}
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        // Initialize Mermaid when page loads
+        document.addEventListener('DOMContentLoaded', function() {{
+            // Unwrap code tags inside mermaid pre blocks
+            document.querySelectorAll('pre.mermaid code').forEach(function(code) {{
+                var pre = code.parentElement;
+                pre.textContent = code.textContent;
+            }});
+            
+            // Initialize Mermaid
+            mermaid.initialize({{ 
+                startOnLoad: true,
+                theme: 'default'
+            }});
+            mermaid.run();
+        }});
+    </script>
 </head>
 <body>
 """
@@ -1270,19 +1374,111 @@ def build_combined_html_target(config: UnifiedConfig, target_config: CombinedHtm
         if target_config.with_toc:
             combined_html += """    <!-- Table of Contents -->
     <div class="toc">
-        <h2>Table of Contents</h2>
+        <h2>📚 Table of Contents</h2>
         <ul>
 """
             
-            # Add TOC entries with links
+            # Extract headers from each page for multi-level TOC
+            from html.parser import HTMLParser
+            
+            class HeaderExtractor(HTMLParser):
+                def __init__(self, max_level=2):
+                    super().__init__()
+                    self.headers = []
+                    self.max_level = max_level
+                    self.current_tag = None
+                    self.current_text = []
+                    
+                def handle_starttag(self, tag, attrs):
+                    if tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                        level = int(tag[1])
+                        if level <= self.max_level:
+                            self.current_tag = tag
+                            self.current_text = []
+                            # Get id if present
+                            self.current_id = dict(attrs).get('id', '')
+                    
+                def handle_endtag(self, tag):
+                    if tag == self.current_tag and self.current_tag:
+                        level = int(self.current_tag[1])
+                        text = ''.join(self.current_text).strip()
+                        if text:
+                            self.headers.append((level, text, self.current_id))
+                        self.current_tag = None
+                        self.current_text = []
+                    
+                def handle_data(self, data):
+                    if self.current_tag:
+                        self.current_text.append(data)
+            
+            # Build TOC with headers grouped by section
+            current_section = None
+            
             for idx, html_file in enumerate(html_files):
-                rel_path = html_file.relative_to(site_dir)
-                page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
-                if rel_path.parent != Path('.'):
-                    section = rel_path.parent.name
-                    combined_html += f'            <li class="level-2"><a href="#page-{idx}">{section} / {page_title}</a></li>\n'
-                else:
-                    combined_html += f'            <li><a href="#page-{idx}">{page_title}</a></li>\n'
+                try:
+                    with open(html_file, 'r', encoding='utf-8') as f:
+                        html_content = f.read()
+                    
+                    rel_path = html_file.relative_to(site_dir)
+                    
+                    # Check if we're in a new section (directory)
+                    if rel_path.parent != Path('.'):
+                        section_name = rel_path.parent.name.replace('-', ' ').replace('_', ' ').title()
+                        if section_name != current_section:
+                            # Add section header
+                            combined_html += f'            <li class="level-1 section-header">{section_name}</li>\n'
+                            current_section = section_name
+                        page_level = 2  # Pages under sections are level 2
+                    else:
+                        page_level = 1  # Root pages are level 1
+                    
+                    # Extract meaningful title from the page
+                    page_title = None
+                    # Try to get title from <title> tag or first <h1>
+                    import re
+                    title_match = re.search(r'<title[^>]*>([^<]+)</title>', html_content)
+                    if title_match:
+                        page_title = title_match.group(1).strip()
+                        # Remove site name suffix if present
+                        if ' - ' in page_title:
+                            page_title = page_title.split(' - ')[0].strip()
+                    
+                    # Fallback to filename-based title
+                    if not page_title or page_title.lower() == 'index':
+                        if rel_path.stem.lower() == 'index':
+                            # Use parent directory name for index pages
+                            if rel_path.parent != Path('.'):
+                                page_title = "Overview"  # Index pages become "Overview"
+                            else:
+                                page_title = "Home"
+                        else:
+                            page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
+                    
+                    # Add page entry
+                    combined_html += f'            <li class="level-{page_level}"><a href="#page-{idx}">{page_title}</a></li>\n'
+                    
+                    # Extract and add headers if toc_levels > 1
+                    if target_config.toc_levels > 1:
+                        header_parser = HeaderExtractor(max_level=target_config.toc_levels)
+                        header_parser.feed(html_content)
+                        
+                        for level, header_text, header_id in header_parser.headers:
+                            if level > 1:  # Skip h1 as it's usually the page title
+                                # Use the original header ID if present, otherwise create one
+                                if header_id:
+                                    anchor = f"page-{idx}-{header_id}"
+                                else:
+                                    # Create a slug from the header text
+                                    slug = header_text.lower().replace(' ', '-').replace('/', '-')
+                                    slug = ''.join(c for c in slug if c.isalnum() or c == '-')
+                                    anchor = f"page-{idx}-{slug}"
+                                # Headers under pages are one level deeper
+                                header_level = page_level + 1
+                                combined_html += f'            <li class="level-{header_level}"><a href="#{anchor}">{header_text}</a></li>\n'
+                
+                except Exception as e:
+                    # Fallback to simple entry
+                    combined_html += f'            <li class="level-{page_level}"><a href="#page-{idx}">{page_title}</a></li>\n'
             
             combined_html += """        </ul>
     </div>
@@ -1295,43 +1491,149 @@ def build_combined_html_target(config: UnifiedConfig, target_config: CombinedHtm
         from html.parser import HTMLParser
         
         class ContentExtractor(HTMLParser):
-            def __init__(self):
+            def __init__(self, page_idx, html_files_map):
                 super().__init__()
-                self.in_main = False
                 self.in_article = False
+                self.skip_depth = 0
                 self.content = []
+                self.page_idx = page_idx
+                self.html_files_map = html_files_map  # Map of relative paths to page indices
                 
             def handle_starttag(self, tag, attrs):
                 attrs_dict = dict(attrs)
-                if tag == 'main' or (tag == 'article' and attrs_dict.get('class', '').find('md-content') >= 0):
-                    self.in_main = True
+                class_name = attrs_dict.get('class', '')
+                
+                # Start capturing when we find the article content
+                if tag == 'article' and 'md-content__inner' in class_name:
                     self.in_article = True
-                elif self.in_main:
-                    attr_str = ' '.join([f'{k}="{v}"' for k, v in attrs])
-                    self.content.append(f'<{tag} {attr_str}>' if attr_str else f'<{tag}>')
+                    return
+                
+                # Skip navigation elements even inside article
+                if self.in_article:
+                    # Skip navigation, sidebars, headers, footers, table of contents
+                    if (tag in ['nav', 'aside', 'header', 'footer'] or
+                        'md-nav' in class_name or
+                        'md-sidebar' in class_name or
+                        'md-header' in class_name or
+                        'md-footer' in class_name or
+                        'md-source' in class_name or
+                        'md-search' in class_name or
+                        'md-content__button' in class_name):
+                        self.skip_depth += 1
+                        return
+                    
+                    if self.skip_depth == 0:
+                        new_attrs = []
+                        
+                        # Add page-specific prefix to header IDs for unique anchors
+                        if tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                            for k, v in attrs:
+                                if k == 'id':
+                                    new_attrs.append((k, f'page-{self.page_idx}-{v}'))
+                                else:
+                                    new_attrs.append((k, v))
+                            attrs = new_attrs
+                        # Rewrite internal links to point to pages in combined HTML
+                        elif tag == 'a':
+                            for k, v in attrs:
+                                if k == 'href':
+                                    # Check if it's an internal link
+                                    if v and not v.startswith(('http://', 'https://', 'mailto:', '#', '//')):
+                                        # Parse the link
+                                        if '#' in v:
+                                            link_path, anchor = v.split('#', 1)
+                                        else:
+                                            link_path, anchor = v, ''
+                                        
+                                        # Normalize the path
+                                        from urllib.parse import unquote
+                                        link_path = unquote(link_path)
+                                        
+                                        # Try to find the target page
+                                        target_idx = None
+                                        for rel_path_str, idx in self.html_files_map.items():
+                                            if link_path in rel_path_str or rel_path_str.endswith(link_path):
+                                                target_idx = idx
+                                                break
+                                        
+                                        # Rewrite the link
+                                        if target_idx is not None:
+                                            if anchor:
+                                                new_href = f'#page-{target_idx}-{anchor}'
+                                            else:
+                                                new_href = f'#page-{target_idx}'
+                                            new_attrs.append((k, new_href))
+                                        else:
+                                            # Keep original if not found
+                                            new_attrs.append((k, v))
+                                    else:
+                                        # External link or anchor, keep as-is
+                                        new_attrs.append((k, v))
+                                else:
+                                    new_attrs.append((k, v))
+                            attrs = new_attrs
+                        else:
+                            new_attrs = list(attrs)
+                            attrs = new_attrs
+                        
+                        attr_str = ' '.join([f'{k}="{v}"' for k, v in attrs])
+                        self.content.append(f'<{tag} {attr_str}>' if attr_str else f'<{tag}>')
+                    else:
+                        self.skip_depth += 1
                     
             def handle_endtag(self, tag):
-                if tag == 'main' or (tag == 'article' and self.in_article):
-                    self.in_main = False
+                if tag == 'article' and self.in_article:
                     self.in_article = False
-                elif self.in_main:
+                    return
+                
+                if self.in_article:
+                    if self.skip_depth > 0:
+                        self.skip_depth -= 1
+                        return
+                    
                     self.content.append(f'</{tag}>')
                     
             def handle_data(self, data):
-                if self.in_main:
+                if self.in_article and self.skip_depth == 0:
                     self.content.append(data)
+        
+        # Create a map of file paths to indices for link rewriting
+        html_files_map = {}
+        for idx, html_file in enumerate(html_files):
+            rel_path = html_file.relative_to(site_dir)
+            html_files_map[str(rel_path)] = idx
+            # Also add without .html extension
+            html_files_map[str(rel_path).replace('.html', '')] = idx
         
         for idx, html_file in enumerate(html_files):
             try:
                 with open(html_file, 'r', encoding='utf-8') as f:
                     html_content = f.read()
                 
-                parser = ContentExtractor()
+                parser = ContentExtractor(idx, html_files_map)
                 parser.feed(html_content)
                 
                 if parser.content:
                     rel_path = html_file.relative_to(site_dir)
-                    page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
+                    
+                    # Extract meaningful title (same logic as TOC)
+                    page_title = None
+                    import re
+                    title_match = re.search(r'<title[^>]*>([^<]+)</title>', html_content)
+                    if title_match:
+                        page_title = title_match.group(1).strip()
+                        if ' - ' in page_title:
+                            page_title = page_title.split(' - ')[0].strip()
+                    
+                    if not page_title or page_title.lower() == 'index':
+                        if rel_path.stem.lower() == 'index':
+                            if rel_path.parent != Path('.'):
+                                page_title = rel_path.parent.name.replace('-', ' ').replace('_', ' ').title()
+                            else:
+                                page_title = "Home"
+                        else:
+                            page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
+                    
                     combined_html += f'\n    <div class="page-content" id="page-{idx}">\n'
                     combined_html += f'        <h1>{page_title}</h1>\n'
                     combined_html += ''.join(parser.content)
@@ -1424,219 +1726,34 @@ def build_pdf_target(config: UnifiedConfig, target_config: PdfTargetConfig) -> b
         
         config.log("Building combined HTML for PDF...", "")
         
-        # Create a combined HTML file with all pages
-        combined_html_path = output_dir / f"_combined_{config.version.current}.html"
-        
-        # Collect all HTML files from the site
-        html_files = []
-        for html_file in sorted(site_dir.rglob("*.html")):
-            if html_file.name not in ['404.html', 'search.html']:
-                html_files.append(html_file)
-        
-        config.log(f"Found {len(html_files)} pages to include", "")
-        
-        # Build combined HTML
-        combined_html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>{config.project.name} v{config.version.current}</title>
-    <style>
-        @page {{
-            margin: 20mm 15mm;
-            @top-center {{
-                content: "{config.project.name} v{config.version.current}";
-                font-size: 10px;
-                color: #666;
-            }}
-            @bottom-center {{
-                content: counter(page) " / " counter(pages);
-                font-size: 10px;
-                color: #666;
-            }}
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-        }}
-        .cover-page {{
-            page-break-after: always;
-            text-align: center;
-            padding-top: 200px;
-        }}
-        .cover-page h1 {{
-            font-size: 48px;
-            margin-bottom: 20px;
-        }}
-        .cover-page .version {{
-            font-size: 24px;
-            color: #666;
-            margin-bottom: 10px;
-        }}
-        .cover-page .description {{
-            font-size: 18px;
-            color: #888;
-            margin-bottom: 50px;
-        }}
-        .cover-page .author {{
-            font-size: 16px;
-            color: #666;
-        }}
-        .toc {{
-            page-break-after: always;
-        }}
-        .toc h1 {{
-            font-size: 32px;
-            margin-bottom: 30px;
-        }}
-        .toc ul {{
-            list-style: none;
-            padding-left: 0;
-        }}
-        .toc li {{
-            margin: 10px 0;
-            padding-left: 20px;
-        }}
-        .toc li.level-2 {{
-            padding-left: 40px;
-        }}
-        .page-content {{
-            page-break-before: always;
-        }}
-        h1 {{
-            page-break-before: always;
-            margin-top: 0;
-        }}
-        h1:first-of-type {{
-            page-break-before: avoid;
-        }}
-        pre {{
-            background: #f6f8fa;
-            padding: 16px;
-            overflow-x: auto;
-            border-radius: 6px;
-            page-break-inside: avoid;
-        }}
-        code {{
-            background: #f6f8fa;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin: 20px 0;
-            page-break-inside: avoid;
-        }}
-        th, td {{
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }}
-        th {{
-            background-color: #f6f8fa;
-        }}
-        img {{
-            max-width: 100%;
-            page-break-inside: avoid;
-        }}
-        @media print {{
-            a {{
-                color: #000;
-                text-decoration: none;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <!-- Cover Page -->
-    <div class="cover-page">
-        <h1>{config.project.name}</h1>
-        <div class="version">Version {config.version.current}</div>
-        <div class="description">{config.project.description}</div>
-        <div class="author">© {config.project.author}</div>
-        <div style="margin-top: 50px; color: #999;">
-            Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        </div>
-    </div>
-    
-    <!-- Table of Contents -->
-    <div class="toc">
-        <h1>Table of Contents</h1>
-        <ul>
-"""
-        
-        # Add TOC entries
-        for html_file in html_files:
-            rel_path = html_file.relative_to(site_dir)
-            page_title = rel_path.stem.replace('-', ' ').replace('_', ' ').title()
-            if rel_path.parent != Path('.'):
-                section = rel_path.parent.name
-                combined_html += f'            <li class="level-2">{section} / {page_title}</li>\n'
+        # Use the combined-html target to generate the HTML
+        if 'combined-html' in config.targets:
+            combined_html_config = config.targets['combined-html']
+            if isinstance(combined_html_config, CombinedHtmlTargetConfig):
+                # Temporarily set same settings as PDF
+                original_toc = combined_html_config.toc_levels
+                combined_html_config.toc_levels = target_config.toc_levels
+                
+                if not build_combined_html_target(config, combined_html_config):
+                    return False
+                
+                # Restore original
+                combined_html_config.toc_levels = original_toc
+                
+                # Use the generated combined HTML
+                combined_html_dir = config.config_dir / combined_html_config.output_dir
+                combined_html_path = combined_html_dir / f"{config.project.name.replace(' ', '_')}-{config.version.current}-combined.html"
             else:
-                combined_html += f'            <li>{page_title}</li>\n'
+                print(f"❌ Combined HTML target not properly configured", file=sys.stderr)
+                return False
+        else:
+            print(f"❌ Combined HTML target not configured", file=sys.stderr)
+            return False
         
-        combined_html += """        </ul>
-    </div>
-    
-    <!-- Page Content -->
-"""
-        
-        # Extract and combine content from each HTML file
-        from html.parser import HTMLParser
-        
-        class ContentExtractor(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.in_main = False
-                self.in_article = False
-                self.content = []
-                
-            def handle_starttag(self, tag, attrs):
-                attrs_dict = dict(attrs)
-                if tag == 'main' or (tag == 'article' and attrs_dict.get('class', '').find('md-content') >= 0):
-                    self.in_main = True
-                    self.in_article = True
-                elif self.in_main:
-                    attr_str = ' '.join([f'{k}="{v}"' for k, v in attrs])
-                    self.content.append(f'<{tag} {attr_str}>' if attr_str else f'<{tag}>')
-                    
-            def handle_endtag(self, tag):
-                if tag == 'main' or (tag == 'article' and self.in_article):
-                    self.in_main = False
-                    self.in_article = False
-                elif self.in_main:
-                    self.content.append(f'</{tag}>')
-                    
-            def handle_data(self, data):
-                if self.in_main:
-                    self.content.append(data)
-        
-        for idx, html_file in enumerate(html_files):
-            try:
-                with open(html_file, 'r', encoding='utf-8') as f:
-                    html_content = f.read()
-                
-                parser = ContentExtractor()
-                parser.feed(html_content)
-                
-                if parser.content:
-                    rel_path = html_file.relative_to(site_dir)
-                    combined_html += f'\n    <div class="page-content" id="page-{idx}">\n'
-                    combined_html += ''.join(parser.content)
-                    combined_html += '\n    </div>\n'
-            except Exception as e:
-                config.log(f"Warning: Could not process {html_file.name}: {e}", "⚠️")
-        
-        combined_html += """
-</body>
-</html>
-"""
-        
-        # Write combined HTML
-        with open(combined_html_path, 'w', encoding='utf-8') as f:
-            f.write(combined_html)
+        # Verify the combined HTML exists
+        if not combined_html_path.exists():
+            print(f"❌ Combined HTML file not found: {combined_html_path}", file=sys.stderr)
+            return False
         
         config.log("Rendering PDF from combined HTML...", "")
         
