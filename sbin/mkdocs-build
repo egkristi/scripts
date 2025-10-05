@@ -637,137 +637,74 @@ def build_electron_target(config: UnifiedConfig, target_config: ElectronTargetCo
     
     # Resolve output directory
     output_dir = config.config_dir / target_config.output_dir
-    mkdocs_dir = output_dir / "mkdocs"
+    site_dir = output_dir / "site"
     
     # Create output structure
     output_dir.mkdir(parents=True, exist_ok=True)
-    mkdocs_dir.mkdir(parents=True, exist_ok=True)
     
-    # Sync content
-    content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
-    for dir_name in content_dirs:
-        src_dir = config.source_dir / dir_name
-        dst_dir = mkdocs_dir / dir_name
-        if src_dir.exists():
-            if dst_dir.exists():
-                shutil.rmtree(dst_dir)
-            shutil.copytree(src_dir, dst_dir)
-            config.log(f"Synced {dir_name}/", "📁")
+    # Build static site using temporary mkdocs build
+    temp_build_dir = config.config_dir / ".temp-electron-build"
+    temp_docs_dir = temp_build_dir / "docs"
     
-    # Sync assets
-    assets_source = config.source_dir / config.source.assets_dir
-    if assets_source.exists():
-        for asset_subdir in config.source.asset_subdirs:
-            src_asset = assets_source / asset_subdir
-            dst_asset = mkdocs_dir / asset_subdir
-            if src_asset.exists():
-                if dst_asset.exists():
-                    shutil.rmtree(dst_asset)
-                shutil.copytree(src_asset, dst_asset)
-    
-    # Generate mkdocs.yml
-    mkdocs_yml = output_dir / "mkdocs.yml"
-    generate_mkdocs_yml(config, mkdocs_yml)
-    
-    # Generate pyproject.toml
-    pyproject_content = f"""[project]
-name = "{config.project.name.lower().replace(' ', '-')}"
-version = "{config.version.current}"
-description = "{config.project.description}"
-requires-python = ">=3.8"
-dependencies = [
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.0.0",
-]
-"""
-    (output_dir / "pyproject.toml").write_text(pyproject_content)
-    
-    # Generate run scripts
-    run_unix_content = """#!/bin/bash
-cd "$(dirname "$0")"
-if ! command -v uv &> /dev/null; then
-    echo "uv not found. Installing..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-fi
-uv run mkdocs serve
-"""
-    (output_dir / "run_unix.sh").write_text(run_unix_content)
-    os.chmod(output_dir / "run_unix.sh", 0o755)
-    
-    run_bat_content = """@echo off
-cd /d "%~dp0"
-where uv >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo uv not found. Please install from https://astral.sh/uv
-    pause
-    exit /b 1
-)
-uv run mkdocs serve
-pause
-"""
-    (output_dir / "run_windows.bat").write_text(run_bat_content)
-    
-    run_ps1_content = """$ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
-if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Host "uv not found. Installing..."
-    irm https://astral.sh/uv/install.ps1 | iex
-}
-uv run mkdocs serve
-"""
-    (output_dir / "run_windows.ps1").write_text(run_ps1_content)
-    
-    config.log("Generated portable site files", "📝")
+    try:
+        # Create temp structure
+        temp_docs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy index.md if it exists
+        index_src = config.source_dir / "index.md"
+        if index_src.exists():
+            shutil.copy2(index_src, temp_docs_dir / "index.md")
+        
+        # Sync content
+        content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
+        for dir_name in content_dirs:
+            src_dir = config.source_dir / dir_name
+            dst_dir = temp_docs_dir / dir_name
+            if src_dir.exists():
+                shutil.copytree(src_dir, dst_dir)
+                config.log(f"Synced {dir_name}/", "📁")
+        
+        # Sync assets
+        assets_source = config.source_dir / config.source.assets_dir
+        if assets_source.exists():
+            for asset_subdir in config.source.asset_subdirs:
+                src_asset = assets_source / asset_subdir
+                dst_asset = temp_docs_dir / asset_subdir
+                if src_asset.exists():
+                    shutil.copytree(src_asset, dst_asset)
+        
+        # Generate mkdocs.yml
+        mkdocs_yml = temp_build_dir / "mkdocs.yml"
+        generate_mkdocs_yml(config, mkdocs_yml)
+        
+        # Build static site
+        config.log("Building static site for Electron...", "")
+        if site_dir.exists():
+            shutil.rmtree(site_dir)
+        
+        cmd = ["mkdocs", "build", "--clean", "--site-dir", str(site_dir.resolve()), "--config-file", str(mkdocs_yml.resolve())]
+        subprocess.run(cmd, check=True, cwd=str(temp_build_dir.resolve()))
+        
+        config.log(f"Static site built", "✅")
+        
+    except Exception as e:
+        print(f"❌ Static site build failed: {e}", file=sys.stderr)
+        return False
+    finally:
+        # Clean up temp directory
+        if temp_build_dir.exists():
+            shutil.rmtree(temp_build_dir)
     
     # Generate Electron files
     electron_dir = output_dir / "electron"
     electron_dir.mkdir(exist_ok=True)
     
-    # main.js
-    main_js_content = f"""const {{ app, BrowserWindow }} = require('electron');
+    # main.js - Load static site directly
+    main_js_content = f"""const {{ app, BrowserWindow, protocol }} = require('electron');
 const path = require('path');
-const {{ spawn }} = require('child_process');
-const http = require('http');
+const url = require('url');
 
 let mainWindow;
-let mkdocsProcess;
-const PORT = 8000;
-
-function checkPort(port, callback) {{
-  const server = http.createServer();
-  server.once('error', () => callback(false));
-  server.once('listening', () => {{
-    server.close();
-    callback(true);
-  }});
-  server.listen(port);
-}}
-
-function startMkDocs() {{
-  return new Promise((resolve, reject) => {{
-    checkPort(PORT, (available) => {{
-      if (!available) {{
-        console.log('Port already in use, assuming MkDocs is running');
-        resolve();
-        return;
-      }}
-      
-      const isWindows = process.platform === 'win32';
-      const cmd = isWindows ? 'run_windows.bat' : './run_unix.sh';
-      
-      mkdocsProcess = spawn(cmd, [], {{
-        cwd: path.join(__dirname, '..'),
-        shell: true,
-        detached: !isWindows
-      }});
-      
-      mkdocsProcess.stdout.on('data', (data) => console.log(data.toString()));
-      mkdocsProcess.stderr.on('data', (data) => console.error(data.toString()));
-      
-      setTimeout(resolve, 3000);
-    }});
-  }});
-}}
 
 function createWindow() {{
   mainWindow = new BrowserWindow({{
@@ -775,29 +712,43 @@ function createWindow() {{
     height: 900,
     webPreferences: {{
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      webSecurity: true
     }},
-    title: '{config.project.name}'
+    title: '{config.project.name} v{config.version.current}'
   }});
   
-  mainWindow.loadURL(`http://localhost:${{PORT}}`);
-  mainWindow.on('closed', () => mainWindow = null);
+  // Determine the base directory (handle both dev and packaged app)
+  const isDev = !app.isPackaged;
+  const siteDir = isDev 
+    ? path.join(__dirname, '..', 'site')
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'site');
+  
+  const indexPath = path.join(siteDir, 'index.html');
+  
+  console.log('Loading site from:', siteDir);
+  console.log('Index file:', indexPath);
+  
+  // Load the index.html file
+  mainWindow.loadFile(indexPath);
+  
+  mainWindow.on('closed', () => {{
+    mainWindow = null;
+  }});
 }}
 
-app.on('ready', async () => {{
-  await startMkDocs();
+app.on('ready', () => {{
   createWindow();
 }});
 
 app.on('window-all-closed', () => {{
-  if (mkdocsProcess) {{
-    mkdocsProcess.kill();
-  }}
   app.quit();
 }});
 
 app.on('activate', () => {{
-  if (mainWindow === null) createWindow();
+  if (mainWindow === null) {{
+    createWindow();
+  }}
 }});
 """
     (electron_dir / "main.js").write_text(main_js_content)
@@ -829,12 +780,10 @@ app.on('activate', () => {{
             },
             "files": [
                 "electron/**/*",
-                "mkdocs/**/*",
-                "pyproject.toml",
-                "mkdocs.yml",
-                "run_*.sh",
-                "run_*.bat",
-                "run_*.ps1"
+                "site/**/*"
+            ],
+            "asarUnpack": [
+                "site/**/*"
             ],
             "mac": {
                 "category": "public.app-category.developer-tools",
@@ -992,8 +941,8 @@ def main() -> int:
                     break
             
             elif target_name == 'electron' and isinstance(target_config, ElectronTargetConfig):
-                # Check for override flags
-                auto_build = args.electron_build
+                # Default to auto-build for electron target (always build unless explicitly disabled)
+                auto_build = True  # Always build electron apps by default
                 platforms = args.electron_platforms.split(',') if args.electron_platforms else None
                 
                 if not build_electron_target(config, target_config, auto_build, platforms):
