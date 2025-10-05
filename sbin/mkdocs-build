@@ -807,6 +807,7 @@ app.on('activate', () => {{
         "name": config.project.name.lower().replace(' ', '-'),
         "version": config.version.current,
         "description": config.project.description,
+        "author": config.project.author,
         "main": "electron/main.js",
         "scripts": {
             "start": "electron .",
