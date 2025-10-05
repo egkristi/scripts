@@ -28,18 +28,38 @@ func main() {
 		if strings.HasPrefix(r.URL.Path, "/assets/") || hasCacheableExt(r.URL.Path) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
+		
+		// Clean the path
+		cleanPath := path.Clean(r.URL.Path)
+		if cleanPath == "." {
+			cleanPath = "/"
+		}
+		
+		// For root path, serve index.html directly
+		if cleanPath == "/" {
+			cleanPath = "/index.html"
+		}
+		
 		// Try to serve the requested file
-		f, err := sub.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
+		filePath := strings.TrimPrefix(cleanPath, "/")
+		f, err := sub.Open(filePath)
 		if err == nil {
 			f.Close()
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		// SPA fallback: serve index.html
-		r2 := new(http.Request)
-		*r2 = *r
-		r2.URL = cloneURL(r.URL, "/index.html")
-		fileServer.ServeHTTP(w, r2)
+		
+		// If file not found and it's not already index.html, try index.html
+		if !strings.HasSuffix(cleanPath, "index.html") {
+			r2 := new(http.Request)
+			*r2 = *r
+			r2.URL = cloneURL(r.URL, "/index.html")
+			fileServer.ServeHTTP(w, r2)
+			return
+		}
+		
+		// If index.html also doesn't exist, return 404
+		http.NotFound(w, r)
 	})
 
 	srv := &http.Server{
@@ -67,15 +87,17 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		// CSP that supports MkDocs Material with Mermaid, code highlighting, and inline scripts
+		// Permissive CSP for MkDocs Material with Mermaid
+		// Allows CDN resources (unpkg.com, cdn.jsdelivr.net) for Mermaid
 		csp := "default-src 'self'; " +
-			"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-			"style-src 'self' 'unsafe-inline'; " +
-			"img-src 'self' data: https:; " +
-			"font-src 'self' data:; " +
-			"connect-src 'self'; " +
-			"frame-src 'self'; " +
-			"worker-src 'self' blob:"
+			"script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://unpkg.com https://cdn.jsdelivr.net; " +
+			"style-src 'self' 'unsafe-inline' blob: https://unpkg.com https://cdn.jsdelivr.net; " +
+			"img-src 'self' data: https: blob:; " +
+			"font-src 'self' data: blob: https://fonts.gstatic.com; " +
+			"connect-src 'self' blob: https://unpkg.com https://cdn.jsdelivr.net; " +
+			"frame-src 'self' blob:; " +
+			"worker-src 'self' blob:; " +
+			"child-src 'self' blob:"
 		w.Header().Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})

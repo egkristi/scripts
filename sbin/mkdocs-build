@@ -425,18 +425,12 @@ def generate_mkdocs_yml(config: UnifiedConfig, output_path: Path) -> None:
     yml_content = f"""site_name: {config.project.name}
 site_description: {config.project.description}
 site_author: {config.project.author}
-"""
-    
-    if config.project.url:
-        yml_content += f"site_url: {config.project.url}\n"
-    
-    yml_content += f"""
+
 # Theme
 theme:
-  name: {config.mkdocs.theme}
+  name: material
   features:
 """
-    
     for feature in config.mkdocs.features:
         yml_content += f"    - {feature}\n"
     
@@ -892,9 +886,13 @@ def build_go_target(config: UnifiedConfig, target_config: GoTargetConfig, platfo
                 if src_asset.exists():
                     shutil.copytree(src_asset, dst_asset)
         
-        # Generate mkdocs.yml
+        # Generate mkdocs.yml (without offline plugin for Mermaid support)
         mkdocs_yml = temp_build_dir / "mkdocs.yml"
+        # Temporarily remove offline plugin for Go builds to support Mermaid
+        original_plugins = config.mkdocs.plugins
+        config.mkdocs.plugins = [p for p in original_plugins if p != "offline"]
         generate_mkdocs_yml(config, mkdocs_yml)
+        config.mkdocs.plugins = original_plugins
         
         # Build static site
         config.log("Building static site for Go binary...", "")
