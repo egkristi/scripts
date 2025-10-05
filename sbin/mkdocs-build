@@ -87,6 +87,7 @@ class BuildTarget(Enum):
     MKDOCS = "mkdocs"
     SITE = "site"
     ELECTRON = "electron"
+    GO = "go"
     ALL = "all"
 
 
@@ -179,6 +180,13 @@ class ElectronTargetConfig(TargetConfig):
     platforms: List[str] = field(default_factory=lambda: ["mac", "win", "linux"])
     auto_build: bool = False
     code_signing: Dict[str, Any] = field(default_factory=lambda: {"enabled": False, "identity": None})
+
+
+@dataclass
+class GoTargetConfig(TargetConfig):
+    """Go binary target configuration."""
+    platforms: List[str] = field(default_factory=lambda: ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"])
+    auto_build: bool = True
 
 
 @dataclass
@@ -288,6 +296,15 @@ def load_unified_config(config_path: Path) -> UnifiedConfig:
             platforms=electron_target.get('platforms', ["mac", "win", "linux"]),
             auto_build=electron_target.get('auto_build', False),
             code_signing=electron_target.get('code_signing', {"enabled": False, "identity": None})
+        )
+    
+    if 'go' in targets_data:
+        go_target = targets_data['go']
+        targets['go'] = GoTargetConfig(
+            enabled=go_target.get('enabled', True),
+            output_dir=go_target.get('output_dir', '../go-dists'),
+            platforms=go_target.get('platforms', ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"]),
+            auto_build=go_target.get('auto_build', True)
         )
     
     return UnifiedConfig(
@@ -774,7 +791,8 @@ app.on('activate', () => {{
         },
         "build": {
             "appId": f"com.{config.project.author.lower().replace(' ', '')}.{config.project.name.lower().replace(' ', '')}",
-            "productName": config.project.name,
+            "productName": config.project.name.replace(' ', '_'),
+            "artifactName": "${productName}-${version}-${arch}.${ext}",
             "directories": {
                 "output": "dists"
             },
@@ -835,6 +853,140 @@ app.on('activate', () => {{
     return True
 
 
+def build_go_target(config: UnifiedConfig, target_config: GoTargetConfig, platforms: Optional[List[str]] = None) -> bool:
+    """Build Go static binary target."""
+    config.log(f"\n=== Building Go Binary Target ===", "🔧")
+    
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create temporary build directory
+    temp_build_dir = config.config_dir / ".temp-go-build"
+    temp_site_dir = temp_build_dir / "site"
+    
+    try:
+        # Build static site first
+        temp_docs_dir = temp_build_dir / "docs"
+        temp_docs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy index.md if it exists
+        index_src = config.source_dir / "index.md"
+        if index_src.exists():
+            shutil.copy2(index_src, temp_docs_dir / "index.md")
+        
+        # Sync content
+        content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
+        for dir_name in content_dirs:
+            src_dir = config.source_dir / dir_name
+            dst_dir = temp_docs_dir / dir_name
+            if src_dir.exists():
+                shutil.copytree(src_dir, dst_dir)
+        
+        # Sync assets
+        assets_source = config.source_dir / config.source.assets_dir
+        if assets_source.exists():
+            for asset_subdir in config.source.asset_subdirs:
+                src_asset = assets_source / asset_subdir
+                dst_asset = temp_docs_dir / asset_subdir
+                if src_asset.exists():
+                    shutil.copytree(src_asset, dst_asset)
+        
+        # Generate mkdocs.yml
+        mkdocs_yml = temp_build_dir / "mkdocs.yml"
+        generate_mkdocs_yml(config, mkdocs_yml)
+        
+        # Build static site
+        config.log("Building static site for Go binary...", "")
+        if temp_site_dir.exists():
+            shutil.rmtree(temp_site_dir)
+        
+        cmd = ["mkdocs", "build", "--clean", "--site-dir", str(temp_site_dir.resolve()), "--config-file", str(mkdocs_yml.resolve())]
+        subprocess.run(cmd, check=True, cwd=str(temp_build_dir.resolve()))
+        
+        config.log(f"Static site built", "✅")
+        
+        # Copy Go template
+        template_path = config.config_dir.parent / "scripts" / "templates" / "static_web_server.go"
+        if not template_path.exists():
+            print(f"❌ Go template not found: {template_path}", file=sys.stderr)
+            return False
+        
+        shutil.copy2(template_path, temp_build_dir / "main.go")
+        config.log("Copied Go template", "📝")
+        
+        # Create go.mod
+        go_mod_content = f"""module mytalent-docs
+
+go 1.21
+"""
+        (temp_build_dir / "go.mod").write_text(go_mod_content)
+        
+        # Build for each platform
+        build_platforms = platforms or target_config.platforms
+        config.log(f"Building Go binaries for: {', '.join(build_platforms)}", "🔨")
+        
+        for platform in build_platforms:
+            goos, goarch = platform.split('/')
+            
+            # Determine output filename - match Electron naming convention
+            # Electron: "MyTalent_Docs-1.0.39-arm64.dmg"
+            # Go: "MyTalent_Docs-1.0.39-darwin-arm64" (with OS for clarity)
+            binary_name = f"{config.project.name.replace(' ', '_')}-{config.version.current}-{goos}-{goarch}"
+            if goos == "windows":
+                binary_name += ".exe"
+            
+            output_path = output_dir / binary_name
+            
+            # Build command
+            env = os.environ.copy()
+            env['GOOS'] = goos
+            env['GOARCH'] = goarch
+            env['CGO_ENABLED'] = '0'
+            
+            config.log(f"Building {goos}/{goarch}...", "")
+            
+            try:
+                result = subprocess.run(
+                    ["go", "build", "-ldflags", "-s -w", "-o", str(output_path.resolve()), "main.go"],
+                    cwd=temp_build_dir,
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                # Check if file was created
+                if not output_path.exists():
+                    print(f"❌ Build succeeded but binary not found: {output_path}", file=sys.stderr)
+                    return False
+                
+                # Get file size
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+                config.log(f"Built {binary_name} ({size_mb:.1f}MB)", "✅")
+                
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Build failed for {platform}: {e}", file=sys.stderr)
+                if e.stdout:
+                    print("STDOUT:", e.stdout, file=sys.stderr)
+                if e.stderr:
+                    print("STDERR:", e.stderr, file=sys.stderr)
+                return False
+        
+    except Exception as e:
+        print(f"❌ Go build failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        # Clean up temp directory
+        if temp_build_dir.exists():
+            shutil.rmtree(temp_build_dir)
+    
+    config.log(f"Go binaries ready: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
+    return True
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -865,6 +1017,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--electron-platforms',
         help='Platforms to build: mac, win, linux, all (comma-separated)'
+    )
+    parser.add_argument(
+        '--go-platforms',
+        help='Go platforms to build: darwin/amd64, linux/amd64, windows/amd64, etc. (comma-separated)'
     )
     parser.add_argument(
         '--list-targets',
@@ -946,6 +1102,13 @@ def main() -> int:
                 platforms = args.electron_platforms.split(',') if args.electron_platforms else None
                 
                 if not build_electron_target(config, target_config, auto_build, platforms):
+                    success = False
+                    break
+            
+            elif target_name == 'go' and isinstance(target_config, GoTargetConfig):
+                platforms = args.go_platforms.split(',') if args.go_platforms else None
+                
+                if not build_go_target(config, target_config, platforms):
                     success = False
                     break
         
