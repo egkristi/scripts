@@ -4,108 +4,409 @@
 # dependencies = []
 # ///
 """
-Build MkDocs documentation from a primary source directory.
+MkDocs Build v2.0 - Multi-Target Build System
 
-This tool creates an ephemeral MkDocs build directory by syncing content from
-a primary documentation source. The build directory can be safely deleted and
-regenerated at any time.
+Unified build system for MkDocs documentation with support for multiple output targets:
+- mkdocs: Ephemeral build directory for development
+- site: Static website output
+- electron: Electron desktop application
 
 Features:
-- Syncs markdown files from source to ephemeral build directory
-- Copies static assets (CSS, JS, fonts, etc.)
-- Rebuilds build directory from scratch on each run
-- Configurable via command-line or config file
-- Runs mkdocs build automatically
+- Single unified configuration file
+- Multi-target builds in one command
+- Built-in version management
+- Dynamic mkdocs.yml generation
+- Extensible target system
 
 Usage:
-  build-mkdocs [--config CONFIG] [--source-dir DIR] [--build-dir DIR] \
-               [--mkdocs-config FILE] [--no-build] [--clean-only]
+  mkdocs-build-v2 --config docs/mkdocs-build.json [--target TARGET]
 
 Examples:
-  # Build with default structure (docs/ -> mkdocs/docs/)
-  build-mkdocs
+  # Build default target (mkdocs)
+  mkdocs-build-v2 --config docs/mkdocs-build.json
+  
+  # Build specific target
+  mkdocs-build-v2 --config docs/mkdocs-build.json --target site
+  
+  # Build multiple targets
+  mkdocs-build-v2 --config docs/mkdocs-build.json --target mkdocs,site
+  
+  # Build all enabled targets
+  mkdocs-build-v2 --config docs/mkdocs-build.json --target all
+  
+  # Build electron with auto-build
+  mkdocs-build-v2 --config docs/mkdocs-build.json --target electron --electron-build
 
-  # Custom source and build directories
-  build-mkdocs --source-dir documentation --build-dir .mkdocs-build
-
-  # Just clean the build directory without rebuilding
-  build-mkdocs --clean-only
-
-  # Sync files but don't run mkdocs build
-  build-mkdocs --no-build
-
-  # Use a config file
-  build-mkdocs --config build-config.json
-
-Config File Format (JSON):
+Config File Format (docs/mkdocs-build.json):
   {
-    "source_dir": "docs",
-    "build_dir": "mkdocs",
-    "docs_subdir": "docs",
-    "mkdocs_config": "mkdocs.yml",
-    "root_files": ["README.md", "LICENSE.md"],
-    "content_dirs": ["ARCHITECTURE", "BUSINESS", "DEVELOPMENT"],
-    "assets_dir": ".mkdocs-assets",
-    "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+    "version": {
+      "current": "1.0.0",
+      "auto_increment": "patch"
+    },
+    "project": {
+      "name": "My Docs",
+      "description": "Documentation",
+      "author": "Author Name"
+    },
+    "source": {
+      "docs_dir": ".",
+      "content_dirs": ["ARCHITECTURE", "BUSINESS"]
+    },
+    "targets": {
+      "mkdocs": {"enabled": true, "output_dir": "../mkdocs"},
+      "site": {"enabled": true, "output_dir": "../site"},
+      "electron": {"enabled": false, "output_dir": "../desktop-app"}
+    }
   }
-
-Note: The build directory is ephemeral and should be added to .gitignore.
-All source content should be maintained in the primary source directory.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Set
+
+# Version
+VERSION = "2.0.0"
+
+
+class BuildTarget(Enum):
+    """Available build targets."""
+    MKDOCS = "mkdocs"
+    SITE = "site"
+    ELECTRON = "electron"
+    ALL = "all"
 
 
 @dataclass
-class BuildConfig:
-    """Configuration for MkDocs build process."""
-    project_root: Path
-    source_dir: Path
-    build_dir: Path
-    docs_subdir: str = "docs"
-    mkdocs_config: Optional[Path] = None
-    root_files: List[str] = field(default_factory=lambda: ["README.md", "LICENSE.md"])
+class VersionConfig:
+    """Version configuration."""
+    current: str = "0.0.1"
+    build_count: int = 0
+    auto_increment: str = "patch"  # major, minor, patch, none
+    
+    def increment(self) -> str:
+        """Increment version based on auto_increment setting."""
+        if self.auto_increment == "none":
+            return self.current
+        
+        match = re.match(r'(\d+)\.(\d+)\.(\d+)', self.current)
+        if not match:
+            # Fallback for non-standard version
+            return f"{self.current}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        major, minor, patch = map(int, match.groups())
+        
+        if self.auto_increment == "major":
+            return f"{major + 1}.0.0"
+        elif self.auto_increment == "minor":
+            return f"{major}.{minor + 1}.0"
+        else:  # patch
+            return f"{major}.{minor}.{patch + 1}"
+
+
+@dataclass
+class ProjectConfig:
+    """Project metadata configuration."""
+    name: str = "Documentation"
+    description: str = "Project Documentation"
+    author: str = "Author"
+    url: Optional[str] = None
+
+
+@dataclass
+class SourceConfig:
+    """Source documentation configuration."""
+    docs_dir: str = "."
     content_dirs: List[str] = field(default_factory=list)
     assets_dir: str = ".mkdocs-assets"
     asset_subdirs: List[str] = field(default_factory=lambda: ["assets", "javascripts", "stylesheets"])
-    silent: bool = False
-    no_build: bool = False
-    clean_only: bool = False
 
+
+@dataclass
+class MkDocsConfig:
+    """MkDocs-specific configuration."""
+    theme: str = "material"
+    features: List[str] = field(default_factory=lambda: [
+        "navigation.tabs",
+        "navigation.sections",
+        "search.highlight"
+    ])
+    plugins: List[str] = field(default_factory=lambda: ["search", "offline"])
+    extensions: List[str] = field(default_factory=lambda: [
+        "admonition",
+        "pymdownx.superfences",
+        "pymdownx.highlight"
+    ])
+
+
+@dataclass
+class TargetConfig:
+    """Base target configuration."""
+    enabled: bool = True
+    output_dir: str = ""
+
+
+@dataclass
+class MkDocsTargetConfig(TargetConfig):
+    """MkDocs target configuration."""
+    docs_subdir: str = "docs"
+    auto_build: bool = True
+
+
+@dataclass
+class SiteTargetConfig(TargetConfig):
+    """Static site target configuration."""
+    clean_build: bool = True
+    minify: bool = False
+
+
+@dataclass
+class ElectronTargetConfig(TargetConfig):
+    """Electron target configuration."""
+    platforms: List[str] = field(default_factory=lambda: ["mac", "win", "linux"])
+    auto_build: bool = False
+    code_signing: Dict[str, Any] = field(default_factory=lambda: {"enabled": False, "identity": None})
+
+
+@dataclass
+class UnifiedConfig:
+    """Unified build configuration."""
+    config_path: Path
+    version: VersionConfig
+    project: ProjectConfig
+    source: SourceConfig
+    mkdocs: MkDocsConfig
+    targets: Dict[str, TargetConfig]
+    
     @property
-    def build_docs_dir(self) -> Path:
-        """Full path to the docs directory inside build_dir."""
-        return self.build_dir / self.docs_subdir
-
+    def config_dir(self) -> Path:
+        """Directory containing the config file."""
+        return self.config_path.parent
+    
     @property
-    def assets_source_dir(self) -> Path:
-        """Full path to the assets source directory."""
-        return self.source_dir / self.assets_dir
-
+    def source_dir(self) -> Path:
+        """Absolute path to source directory."""
+        return self.config_dir / self.source.docs_dir
+    
     def log(self, msg: str, emoji: str = "ℹ️") -> None:
-        """Print a log message unless silent mode is enabled."""
-        if not self.silent:
-            print(f"{emoji}  {msg}")
+        """Print a log message."""
+        print(f"{emoji}  {msg}")
 
 
-def load_config_file(config_path: Path, project_root: Path) -> dict:
-    """Load configuration from a JSON file."""
+def load_unified_config(config_path: Path) -> UnifiedConfig:
+    """Load and parse unified configuration file."""
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            config_data = json.load(f)
-        return config_data
+            data = json.load(f)
     except Exception as e:
         print(f"❌ Error loading config file {config_path}: {e}", file=sys.stderr)
         sys.exit(1)
+    
+    # Parse version config
+    version_data = data.get('version', {})
+    version = VersionConfig(
+        current=version_data.get('current', '0.0.1'),
+        build_count=version_data.get('build_count', 0),
+        auto_increment=version_data.get('auto_increment', 'patch')
+    )
+    
+    # Parse project config
+    project_data = data.get('project', {})
+    project = ProjectConfig(
+        name=project_data.get('name', 'Documentation'),
+        description=project_data.get('description', 'Project Documentation'),
+        author=project_data.get('author', 'Author'),
+        url=project_data.get('url')
+    )
+    
+    # Parse source config
+    source_data = data.get('source', {})
+    source = SourceConfig(
+        docs_dir=source_data.get('docs_dir', '.'),
+        content_dirs=source_data.get('content_dirs', []),
+        assets_dir=source_data.get('assets_dir', '.mkdocs-assets'),
+        asset_subdirs=source_data.get('asset_subdirs', ["assets", "javascripts", "stylesheets"])
+    )
+    
+    # Parse mkdocs config
+    mkdocs_data = data.get('mkdocs', {})
+    mkdocs = MkDocsConfig(
+        theme=mkdocs_data.get('theme', 'material'),
+        features=mkdocs_data.get('features', [
+            "navigation.tabs",
+            "navigation.sections",
+            "search.highlight"
+        ]),
+        plugins=mkdocs_data.get('plugins', ["search", "offline"]),
+        extensions=mkdocs_data.get('extensions', [
+            "admonition",
+            "pymdownx.superfences",
+            "pymdownx.highlight"
+        ])
+    )
+    
+    # Parse targets
+    targets_data = data.get('targets', {})
+    targets = {}
+    
+    if 'mkdocs' in targets_data:
+        mkdocs_target = targets_data['mkdocs']
+        targets['mkdocs'] = MkDocsTargetConfig(
+            enabled=mkdocs_target.get('enabled', True),
+            output_dir=mkdocs_target.get('output_dir', '../mkdocs'),
+            docs_subdir=mkdocs_target.get('docs_subdir', 'docs'),
+            auto_build=mkdocs_target.get('auto_build', True)
+        )
+    
+    if 'site' in targets_data:
+        site_target = targets_data['site']
+        targets['site'] = SiteTargetConfig(
+            enabled=site_target.get('enabled', True),
+            output_dir=site_target.get('output_dir', '../site'),
+            clean_build=site_target.get('clean_build', True),
+            minify=site_target.get('minify', False)
+        )
+    
+    if 'electron' in targets_data:
+        electron_target = targets_data['electron']
+        targets['electron'] = ElectronTargetConfig(
+            enabled=electron_target.get('enabled', False),
+            output_dir=electron_target.get('output_dir', '../desktop-app'),
+            platforms=electron_target.get('platforms', ["mac", "win", "linux"]),
+            auto_build=electron_target.get('auto_build', False),
+            code_signing=electron_target.get('code_signing', {"enabled": False, "identity": None})
+        )
+    
+    return UnifiedConfig(
+        config_path=config_path,
+        version=version,
+        project=project,
+        source=source,
+        mkdocs=mkdocs,
+        targets=targets
+    )
+
+
+def save_version(config: UnifiedConfig) -> None:
+    """Save updated version back to config file."""
+    try:
+        with open(config.config_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        data['version']['current'] = config.version.current
+        data['version']['build_count'] = config.version.build_count
+        
+        with open(config.config_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')  # Add trailing newline
+    except Exception as e:
+        print(f"⚠️  Warning: Could not save version: {e}", file=sys.stderr)
+
+
+def generate_mkdocs_yml(config: UnifiedConfig, output_path: Path) -> None:
+    """Generate mkdocs.yml from unified config."""
+    # Auto-detect content dirs if not specified
+    content_dirs = config.source.content_dirs
+    if not content_dirs:
+        content_dirs = []
+        for item in config.source_dir.iterdir():
+            if item.is_dir() and not item.name.startswith('.') and any(item.rglob('*.md')):
+                content_dirs.append(item.name)
+        content_dirs = sorted(content_dirs)
+    
+    # Build navigation structure
+    nav_items = []
+    for dir_name in content_dirs:
+        nav_items.append(f"  - {dir_name}: {dir_name}/")
+    
+    nav_section = "\n".join(nav_items) if nav_items else "  - Home: index.md"
+    
+    # Generate YAML content
+    yml_content = f"""site_name: {config.project.name}
+site_description: {config.project.description}
+site_author: {config.project.author}
+"""
+    
+    if config.project.url:
+        yml_content += f"site_url: {config.project.url}\n"
+    
+    yml_content += f"""
+# Theme
+theme:
+  name: {config.mkdocs.theme}
+  features:
+"""
+    
+    for feature in config.mkdocs.features:
+        yml_content += f"    - {feature}\n"
+    
+    yml_content += """  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# Navigation
+nav:
+"""
+    yml_content += nav_section + "\n"
+    
+    yml_content += "\n# Plugins\nplugins:\n"
+    for plugin in config.mkdocs.plugins:
+        yml_content += f"  - {plugin}\n"
+    
+    yml_content += "\n# Extensions\nmarkdown_extensions:\n"
+    for ext in config.mkdocs.extensions:
+        if ext == "pymdownx.superfences":
+            yml_content += """  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+"""
+        elif ext == "pymdownx.highlight":
+            yml_content += """  - pymdownx.highlight:
+      anchor_linenums: true
+"""
+        elif ext == "pymdownx.tabbed":
+            yml_content += """  - pymdownx.tabbed:
+      alternate_style: true
+"""
+        elif ext == "pymdownx.tasklist":
+            yml_content += """  - pymdownx.tasklist:
+      custom_checkbox: true
+"""
+        elif ext == "pymdownx.emoji":
+            yml_content += """  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+"""
+        else:
+            yml_content += f"  - {ext}\n"
+    
+    # Write to file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(yml_content)
+    
+    config.log(f"Generated mkdocs.yml", "📝")
 
 
 def auto_detect_content_dirs(source_dir: Path) -> List[str]:
@@ -114,170 +415,432 @@ def auto_detect_content_dirs(source_dir: Path) -> List[str]:
     if not source_dir.exists():
         return content_dirs
     
-    # Look for directories with markdown files (excluding hidden dirs and assets)
     for item in source_dir.iterdir():
         if item.is_dir() and not item.name.startswith('.'):
-            # Check if directory contains markdown files
             if any(item.rglob('*.md')):
                 content_dirs.append(item.name)
     
     return sorted(content_dirs)
 
 
-def clean_build_dir(config: BuildConfig) -> None:
-    """Remove the entire build directory."""
-    if config.build_dir.exists():
-        config.log(f"Removing existing {config.build_dir.name}/ directory...", "🗑️")
-        shutil.rmtree(config.build_dir)
-        config.log(f"Cleaned {config.build_dir.name}/", "✓")
-
-
-def create_build_structure(config: BuildConfig) -> None:
-    """Create the build directory structure."""
-    config.build_docs_dir.mkdir(parents=True, exist_ok=True)
-    config.log(f"Created fresh {config.build_docs_dir.relative_to(config.project_root)}/", "📁")
-
-
-def sync_root_files(config: BuildConfig) -> None:
-    """Sync root-level files to the build directory."""
-    for filename in config.root_files:
-        src = config.project_root / filename
-        dst = config.build_docs_dir / filename
-        
-        if src.exists():
-            shutil.copy2(src, dst)
-            config.log(f"Synced {filename}", "📄")
-
-
-def sync_content_dirs(config: BuildConfig) -> None:
-    """Sync content directories from source to build."""
-    dirs_to_sync = config.content_dirs
+def build_mkdocs_target(config: UnifiedConfig, target_config: MkDocsTargetConfig) -> bool:
+    """Build MkDocs ephemeral directory target."""
+    config.log(f"\n=== Building MkDocs Target ===", "📁")
     
-    # Auto-detect if no content dirs specified
-    if not dirs_to_sync:
-        dirs_to_sync = auto_detect_content_dirs(config.source_dir)
-        if dirs_to_sync:
-            config.log(f"Auto-detected content directories: {', '.join(dirs_to_sync)}", "🔍")
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
+    docs_dir = output_dir / target_config.docs_subdir
     
-    for dir_name in dirs_to_sync:
+    # Clean existing build
+    if output_dir.exists():
+        config.log(f"Removing existing {output_dir.name}/", "🗑️")
+        shutil.rmtree(output_dir)
+    
+    # Create structure
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    config.log(f"Created {output_dir.relative_to(config.config_dir.parent)}/", "📁")
+    
+    # Auto-detect content dirs if not specified
+    content_dirs = config.source.content_dirs
+    if not content_dirs:
+        content_dirs = auto_detect_content_dirs(config.source_dir)
+        if content_dirs:
+            config.log(f"Auto-detected: {', '.join(content_dirs)}", "🔍")
+    
+    # Sync content directories
+    for dir_name in content_dirs:
         src_dir = config.source_dir / dir_name
-        dst_dir = config.build_docs_dir / dir_name
+        dst_dir = docs_dir / dir_name
         
         if src_dir.exists() and src_dir.is_dir():
             shutil.copytree(src_dir, dst_dir)
-            config.log(f"Synced {dir_name}/ directory", "📁")
+            config.log(f"Synced {dir_name}/", "📁")
+    
+    # Sync assets
+    assets_source = config.source_dir / config.source.assets_dir
+    if assets_source.exists():
+        for asset_subdir in config.source.asset_subdirs:
+            src_asset = assets_source / asset_subdir
+            dst_asset = docs_dir / asset_subdir
+            
+            if src_asset.exists() and src_asset.is_dir():
+                shutil.copytree(src_asset, dst_asset)
+                config.log(f"Synced {asset_subdir}/ assets", "🎨")
+    
+    # Generate mkdocs.yml in output directory
+    mkdocs_yml_path = output_dir / "mkdocs.yml"
+    generate_mkdocs_yml(config, mkdocs_yml_path)
+    
+    # Run mkdocs build if enabled
+    if target_config.auto_build:
+        config.log("Building MkDocs site...", "🏗️")
+        try:
+            cmd = ["mkdocs", "build", "--clean", "--config-file", str(mkdocs_yml_path)]
+            subprocess.run(cmd, check=True, cwd=output_dir.parent)
+            config.log("MkDocs build successful!", "✅")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ MkDocs build failed: {e}", file=sys.stderr)
+            return False
+        except FileNotFoundError:
+            print(f"❌ mkdocs not found. Install with: uv pip install mkdocs mkdocs-material", file=sys.stderr)
+            return False
+    
+    return True
 
 
-def sync_assets(config: BuildConfig) -> None:
-    """Sync static assets from source to build."""
-    if not config.assets_source_dir.exists():
-        return
+def build_site_target(config: UnifiedConfig, target_config: SiteTargetConfig) -> bool:
+    """Build static site target."""
+    config.log(f"\n=== Building Site Target ===", "🌐")
     
-    for asset_subdir in config.asset_subdirs:
-        src_asset = config.assets_source_dir / asset_subdir
-        dst_asset = config.build_docs_dir / asset_subdir
-        
-        if src_asset.exists() and src_asset.is_dir():
-            shutil.copytree(src_asset, dst_asset)
-            config.log(f"Synced {asset_subdir}/ assets", "🎨")
-
-
-def rebuild_build_dir(config: BuildConfig) -> None:
-    """Rebuild the ephemeral build directory from scratch."""
-    config.log("Rebuilding build directory...", "🔄")
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
     
-    # Clean existing build
-    clean_build_dir(config)
+    # Clean if requested
+    if target_config.clean_build and output_dir.exists():
+        config.log(f"Cleaning {output_dir.name}/", "🗑️")
+        shutil.rmtree(output_dir)
     
-    # Create structure
-    create_build_structure(config)
-    
-    # Sync content
-    sync_root_files(config)
-    sync_content_dirs(config)
-    sync_assets(config)
-    
-    config.log("Build directory ready", "✓")
-
-
-def run_mkdocs_build(config: BuildConfig) -> None:
-    """Run mkdocs build command."""
-    if config.no_build:
-        config.log("Skipping mkdocs build (--no-build)", "⏭️")
-        return
-    
-    config.log("Building MkDocs site...", "🏗️")
-    
-    cmd = ["mkdocs", "build", "--clean"]
-    
-    if config.mkdocs_config:
-        cmd.extend(["--config-file", str(config.mkdocs_config)])
+    # Create temporary mkdocs directory for building
+    temp_build_dir = config.config_dir / ".temp-mkdocs-build"
+    temp_docs_dir = temp_build_dir / "docs"
     
     try:
-        subprocess.run(cmd, check=True, cwd=config.project_root)
-        config.log("Documentation built successfully!", "✅")
-        config.log("Output directory: site/", "📁")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Error building documentation: {e}", file=sys.stderr)
-        sys.exit(1)
-    except FileNotFoundError:
-        print("❌ mkdocs command not found. Install with: uv pip install mkdocs mkdocs-material", file=sys.stderr)
-        sys.exit(1)
+        # Create temp structure
+        temp_docs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Sync content
+        content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
+        for dir_name in content_dirs:
+            src_dir = config.source_dir / dir_name
+            dst_dir = temp_docs_dir / dir_name
+            if src_dir.exists():
+                shutil.copytree(src_dir, dst_dir)
+        
+        # Sync assets
+        assets_source = config.source_dir / config.source.assets_dir
+        if assets_source.exists():
+            for asset_subdir in config.source.asset_subdirs:
+                src_asset = assets_source / asset_subdir
+                dst_asset = temp_docs_dir / asset_subdir
+                if src_asset.exists():
+                    shutil.copytree(src_asset, dst_asset)
+        
+        # Generate mkdocs.yml
+        mkdocs_yml = temp_build_dir / "mkdocs.yml"
+        generate_mkdocs_yml(config, mkdocs_yml)
+        
+        # Build site
+        config.log("Building static site...", "🏗️")
+        cmd = ["mkdocs", "build", "--clean", "--site-dir", str(output_dir), "--config-file", str(mkdocs_yml)]
+        subprocess.run(cmd, check=True, cwd=temp_build_dir)
+        
+        config.log(f"Site built: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
+        
+    except Exception as e:
+        print(f"❌ Site build failed: {e}", file=sys.stderr)
+        return False
+    finally:
+        # Clean up temp directory
+        if temp_build_dir.exists():
+            shutil.rmtree(temp_build_dir)
+    
+    return True
+
+
+def build_electron_target(config: UnifiedConfig, target_config: ElectronTargetConfig, auto_build: bool = False, platforms: Optional[List[str]] = None) -> bool:
+    """Build Electron desktop app target."""
+    config.log(f"\n=== Building Electron Target ===", "⚡")
+    
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
+    mkdocs_dir = output_dir / "mkdocs"
+    
+    # Create output structure
+    output_dir.mkdir(parents=True, exist_ok=True)
+    mkdocs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Sync content
+    content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
+    for dir_name in content_dirs:
+        src_dir = config.source_dir / dir_name
+        dst_dir = mkdocs_dir / dir_name
+        if src_dir.exists():
+            if dst_dir.exists():
+                shutil.rmtree(dst_dir)
+            shutil.copytree(src_dir, dst_dir)
+            config.log(f"Synced {dir_name}/", "📁")
+    
+    # Sync assets
+    assets_source = config.source_dir / config.source.assets_dir
+    if assets_source.exists():
+        for asset_subdir in config.source.asset_subdirs:
+            src_asset = assets_source / asset_subdir
+            dst_asset = mkdocs_dir / asset_subdir
+            if src_asset.exists():
+                if dst_asset.exists():
+                    shutil.rmtree(dst_asset)
+                shutil.copytree(src_asset, dst_asset)
+    
+    # Generate mkdocs.yml
+    mkdocs_yml = output_dir / "mkdocs.yml"
+    generate_mkdocs_yml(config, mkdocs_yml)
+    
+    # Generate pyproject.toml
+    pyproject_content = f"""[project]
+name = "{config.project.name.lower().replace(' ', '-')}"
+version = "{config.version.current}"
+description = "{config.project.description}"
+requires-python = ">=3.8"
+dependencies = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+]
+"""
+    (output_dir / "pyproject.toml").write_text(pyproject_content)
+    
+    # Generate run scripts
+    run_unix_content = """#!/bin/bash
+cd "$(dirname "$0")"
+if ! command -v uv &> /dev/null; then
+    echo "uv not found. Installing..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+uv run mkdocs serve
+"""
+    (output_dir / "run_unix.sh").write_text(run_unix_content)
+    os.chmod(output_dir / "run_unix.sh", 0o755)
+    
+    run_bat_content = """@echo off
+cd /d "%~dp0"
+where uv >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo uv not found. Please install from https://astral.sh/uv
+    pause
+    exit /b 1
+)
+uv run mkdocs serve
+pause
+"""
+    (output_dir / "run_windows.bat").write_text(run_bat_content)
+    
+    run_ps1_content = """$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host "uv not found. Installing..."
+    irm https://astral.sh/uv/install.ps1 | iex
+}
+uv run mkdocs serve
+"""
+    (output_dir / "run_windows.ps1").write_text(run_ps1_content)
+    
+    config.log("Generated portable site files", "📝")
+    
+    # Generate Electron files
+    electron_dir = output_dir / "electron"
+    electron_dir.mkdir(exist_ok=True)
+    
+    # main.js
+    main_js_content = f"""const {{ app, BrowserWindow }} = require('electron');
+const path = require('path');
+const {{ spawn }} = require('child_process');
+const http = require('http');
+
+let mainWindow;
+let mkdocsProcess;
+const PORT = 8000;
+
+function checkPort(port, callback) {{
+  const server = http.createServer();
+  server.once('error', () => callback(false));
+  server.once('listening', () => {{
+    server.close();
+    callback(true);
+  }});
+  server.listen(port);
+}}
+
+function startMkDocs() {{
+  return new Promise((resolve, reject) => {{
+    checkPort(PORT, (available) => {{
+      if (!available) {{
+        console.log('Port already in use, assuming MkDocs is running');
+        resolve();
+        return;
+      }}
+      
+      const isWindows = process.platform === 'win32';
+      const cmd = isWindows ? 'run_windows.bat' : './run_unix.sh';
+      
+      mkdocsProcess = spawn(cmd, [], {{
+        cwd: path.join(__dirname, '..'),
+        shell: true,
+        detached: !isWindows
+      }});
+      
+      mkdocsProcess.stdout.on('data', (data) => console.log(data.toString()));
+      mkdocsProcess.stderr.on('data', (data) => console.error(data.toString()));
+      
+      setTimeout(resolve, 3000);
+    }});
+  }});
+}}
+
+function createWindow() {{
+  mainWindow = new BrowserWindow({{
+    width: 1400,
+    height: 900,
+    webPreferences: {{
+      nodeIntegration: false,
+      contextIsolation: true
+    }},
+    title: '{config.project.name}'
+  }});
+  
+  mainWindow.loadURL(`http://localhost:${{PORT}}`);
+  mainWindow.on('closed', () => mainWindow = null);
+}}
+
+app.on('ready', async () => {{
+  await startMkDocs();
+  createWindow();
+}});
+
+app.on('window-all-closed', () => {{
+  if (mkdocsProcess) {{
+    mkdocsProcess.kill();
+  }}
+  app.quit();
+}});
+
+app.on('activate', () => {{
+  if (mainWindow === null) createWindow();
+}});
+"""
+    (electron_dir / "main.js").write_text(main_js_content)
+    
+    # package.json
+    package_json = {
+        "name": config.project.name.lower().replace(' ', '-'),
+        "version": config.version.current,
+        "description": config.project.description,
+        "main": "electron/main.js",
+        "scripts": {
+            "start": "electron .",
+            "build": "electron-builder",
+            "build:mac": "electron-builder --mac",
+            "build:win": "electron-builder --win",
+            "build:linux": "electron-builder --linux",
+            "build:all": "electron-builder -mwl"
+        },
+        "devDependencies": {
+            "electron": "^28.0.0",
+            "electron-builder": "^24.9.0"
+        },
+        "build": {
+            "appId": f"com.{config.project.author.lower().replace(' ', '')}.{config.project.name.lower().replace(' ', '')}",
+            "productName": config.project.name,
+            "directories": {
+                "output": "dists"
+            },
+            "files": [
+                "electron/**/*",
+                "mkdocs/**/*",
+                "pyproject.toml",
+                "mkdocs.yml",
+                "run_*.sh",
+                "run_*.bat",
+                "run_*.ps1"
+            ],
+            "mac": {
+                "category": "public.app-category.developer-tools",
+                "target": ["dmg", "zip"]
+            },
+            "win": {
+                "target": ["nsis"]
+            },
+            "linux": {
+                "target": ["AppImage"],
+                "category": "Development"
+            }
+        }
+    }
+    
+    with open(output_dir / "package.json", 'w') as f:
+        json.dump(package_json, f, indent=2)
+        f.write('\n')
+    
+    config.log("Generated Electron files", "⚡")
+    
+    # Build Electron apps if requested
+    if auto_build or target_config.auto_build:
+        build_platforms = platforms or target_config.platforms
+        config.log(f"Building Electron apps for: {', '.join(build_platforms)}", "🔨")
+        
+        # Install dependencies
+        config.log("Installing Node.js dependencies...", "📦")
+        try:
+            subprocess.run(["npm", "install"], cwd=output_dir, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print(f"❌ npm install failed: {e}", file=sys.stderr)
+            return False
+        
+        # Build for platforms
+        if "all" in build_platforms:
+            cmd = ["npm", "run", "build:all"]
+        else:
+            for platform in build_platforms:
+                cmd = ["npm", "run", f"build:{platform}"]
+                try:
+                    subprocess.run(cmd, cwd=output_dir, check=True)
+                    config.log(f"Built for {platform}", "✅")
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ Build failed for {platform}: {e}", file=sys.stderr)
+                    return False
+    
+    config.log(f"Electron app ready: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
+    return True
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Build MkDocs documentation from a primary source directory",
+        description=f"MkDocs Build v{VERSION} - Multi-Target Build System",
         epilog="Examples:\n"
-               "  build-mkdocs\n"
-               "  build-mkdocs --source-dir documentation --build-dir .build\n"
-               "  build-mkdocs --config build-config.json\n"
-               "  build-mkdocs --clean-only\n",
+               "  mkdocs-build-v2 --config docs/mkdocs-build.json\n"
+               "  mkdocs-build-v2 --config docs/mkdocs-build.json --target site\n"
+               "  mkdocs-build-v2 --config docs/mkdocs-build.json --target all\n",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     parser.add_argument(
         '--config',
         type=Path,
-        help='Path to JSON config file'
+        required=True,
+        help='Path to unified config file (e.g., docs/mkdocs-build.json)'
     )
     parser.add_argument(
-        '--source-dir',
-        type=Path,
-        default=Path('docs'),
-        help='Primary documentation source directory (default: docs)'
+        '--target',
+        default='mkdocs',
+        help='Target(s) to build: mkdocs, site, electron, all (comma-separated)'
     )
     parser.add_argument(
-        '--build-dir',
-        type=Path,
-        default=Path('mkdocs'),
-        help='Ephemeral build directory (default: mkdocs)'
-    )
-    parser.add_argument(
-        '--docs-subdir',
-        default='docs',
-        help='Subdirectory name for docs inside build-dir (default: docs)'
-    )
-    parser.add_argument(
-        '--mkdocs-config',
-        type=Path,
-        help='Path to mkdocs.yml config file (default: mkdocs.yml in project root)'
-    )
-    parser.add_argument(
-        '--no-build',
+        '--electron-build',
         action='store_true',
-        help='Sync files but do not run mkdocs build'
+        help='Build Electron apps (override config)'
     )
     parser.add_argument(
-        '--clean-only',
-        action='store_true',
-        help='Only clean the build directory without rebuilding'
+        '--electron-platforms',
+        help='Platforms to build: mac, win, linux, all (comma-separated)'
     )
     parser.add_argument(
-        '--silent',
+        '--list-targets',
         action='store_true',
-        help='Suppress progress output'
+        help='List available targets and exit'
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'mkdocs-build v{VERSION}'
     )
     
     return parser.parse_args()
@@ -287,60 +850,83 @@ def main() -> int:
     """Main entry point."""
     args = parse_args()
     
-    # Determine project root (current working directory)
-    project_root = Path.cwd()
-    
-    # Load config from file if provided
-    config_data = {}
-    if args.config:
-        config_data = load_config_file(args.config, project_root)
-    
-    # Build configuration (CLI args override config file)
-    source_dir = project_root / (args.source_dir or config_data.get('source_dir', 'docs'))
-    build_dir = project_root / (args.build_dir or config_data.get('build_dir', 'mkdocs'))
-    
-    # Resolve mkdocs config path
-    mkdocs_config = args.mkdocs_config or config_data.get('mkdocs_config')
-    if mkdocs_config:
-        mkdocs_config = project_root / mkdocs_config
-    else:
-        # Default to mkdocs.yml in project root if it exists
-        default_config = project_root / 'mkdocs.yml'
-        if default_config.exists():
-            mkdocs_config = default_config
-    
-    config = BuildConfig(
-        project_root=project_root,
-        source_dir=source_dir,
-        build_dir=build_dir,
-        docs_subdir=args.docs_subdir or config_data.get('docs_subdir', 'docs'),
-        mkdocs_config=mkdocs_config,
-        root_files=config_data.get('root_files', ["README.md", "LICENSE.md"]),
-        content_dirs=config_data.get('content_dirs', []),
-        assets_dir=config_data.get('assets_dir', '.mkdocs-assets'),
-        asset_subdirs=config_data.get('asset_subdirs', ["assets", "javascripts", "stylesheets"]),
-        silent=args.silent,
-        no_build=args.no_build,
-        clean_only=args.clean_only,
-    )
-    
-    # Validate source directory exists
-    if not config.source_dir.exists():
-        print(f"❌ Source directory does not exist: {config.source_dir}", file=sys.stderr)
+    # Load configuration
+    if not args.config.exists():
+        print(f"❌ Config file not found: {args.config}", file=sys.stderr)
         return 1
     
-    # Clean only mode
-    if config.clean_only:
-        clean_build_dir(config)
+    config = load_unified_config(args.config)
+    
+    # List targets mode
+    if args.list_targets:
+        print("Available targets:")
+        for name, target in config.targets.items():
+            status = "✅ enabled" if target.enabled else "❌ disabled"
+            print(f"  - {name}: {status}")
         return 0
     
-    # Rebuild and optionally build
-    try:
-        rebuild_build_dir(config)
-        run_mkdocs_build(config)
+    # Determine targets to build
+    requested_targets: Set[str] = set()
+    if args.target == 'all':
+        requested_targets = {name for name, t in config.targets.items() if t.enabled}
+    else:
+        requested_targets = set(args.target.split(','))
+    
+    # Validate targets
+    for target in requested_targets:
+        if target not in config.targets:
+            print(f"❌ Unknown target: {target}", file=sys.stderr)
+            print(f"   Available: {', '.join(config.targets.keys())}", file=sys.stderr)
+            return 1
+        if not config.targets[target].enabled:
+            print(f"⚠️  Warning: Target '{target}' is disabled in config", file=sys.stderr)
+    
+    # Increment version and build count
+    config.version.current = config.version.increment()
+    config.version.build_count += 1
+    save_version(config)
+    
+    config.log(f"MkDocs Build v{VERSION}", "🚀")
+    config.log(f"Version: {config.version.current} (build #{config.version.build_count})", "📋")
+    config.log(f"Targets: {', '.join(sorted(requested_targets))}", "🎯")
+    
+    # Build targets
+    success = True
+    for target_name in sorted(requested_targets):
+        target_config = config.targets[target_name]
+        
+        try:
+            if target_name == 'mkdocs' and isinstance(target_config, MkDocsTargetConfig):
+                if not build_mkdocs_target(config, target_config):
+                    success = False
+                    break
+            
+            elif target_name == 'site' and isinstance(target_config, SiteTargetConfig):
+                if not build_site_target(config, target_config):
+                    success = False
+                    break
+            
+            elif target_name == 'electron' and isinstance(target_config, ElectronTargetConfig):
+                # Check for override flags
+                auto_build = args.electron_build
+                platforms = args.electron_platforms.split(',') if args.electron_platforms else None
+                
+                if not build_electron_target(config, target_config, auto_build, platforms):
+                    success = False
+                    break
+        
+        except Exception as e:
+            print(f"❌ Error building {target_name}: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            success = False
+            break
+    
+    if success:
+        config.log(f"\n✨ Build complete!", "🎉")
         return 0
-    except Exception as e:
-        print(f"❌ Error: {e}", file=sys.stderr)
+    else:
+        print(f"\n❌ Build failed", file=sys.stderr)
         return 1
 
 
