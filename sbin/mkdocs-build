@@ -389,6 +389,13 @@ def generate_mkdocs_yml(config: UnifiedConfig, output_path: Path) -> None:
     
     # Build complete navigation
     nav_items = []
+    
+    # Check if index.md exists at root and add it first
+    index_path = config.source_dir / "index.md"
+    if index_path.exists():
+        nav_items.append("  - Home: index.md")
+    
+    # Add all content directories
     for dir_name in content_dirs:
         nav_items.extend(build_nav_for_dir(config.source_dir, dir_name))
     
@@ -503,6 +510,12 @@ def build_mkdocs_target(config: UnifiedConfig, target_config: MkDocsTargetConfig
     docs_dir.mkdir(parents=True, exist_ok=True)
     config.log(f"Created {output_dir.relative_to(config.config_dir.parent)}/", "📁")
     
+    # Copy index.md if it exists
+    index_src = config.source_dir / "index.md"
+    if index_src.exists():
+        shutil.copy2(index_src, docs_dir / "index.md")
+        config.log(f"Synced index.md", "📄")
+    
     # Auto-detect content dirs if not specified
     content_dirs = config.source.content_dirs
     if not content_dirs:
@@ -571,6 +584,11 @@ def build_site_target(config: UnifiedConfig, target_config: SiteTargetConfig) ->
         # Create temp structure
         temp_docs_dir.mkdir(parents=True, exist_ok=True)
         
+        # Copy index.md if it exists
+        index_src = config.source_dir / "index.md"
+        if index_src.exists():
+            shutil.copy2(index_src, temp_docs_dir / "index.md")
+        
         # Sync content
         content_dirs = config.source.content_dirs or auto_detect_content_dirs(config.source_dir)
         for dir_name in content_dirs:
@@ -594,8 +612,8 @@ def build_site_target(config: UnifiedConfig, target_config: SiteTargetConfig) ->
         
         # Build site
         config.log("Building static site...", "🏗️")
-        cmd = ["mkdocs", "build", "--clean", "--site-dir", str(output_dir), "--config-file", str(mkdocs_yml)]
-        subprocess.run(cmd, check=True, cwd=temp_build_dir)
+        cmd = ["mkdocs", "build", "--clean", "--site-dir", str(output_dir.resolve()), "--config-file", str(mkdocs_yml.resolve())]
+        subprocess.run(cmd, check=True, cwd=str(temp_build_dir.resolve()))
         
         config.log(f"Site built: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
         
