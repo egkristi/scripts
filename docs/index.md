@@ -19,14 +19,9 @@ Welcome to the comprehensive documentation for the scripts toolkit - a collectio
 
 ### MkDocs Build & Development
 
-* **`mkdocs-build`** - Build MkDocs documentation with ephemeral build directories
+* **`mkdocs-build`** - Multi-target build system (mkdocs, site, electron) with unified config
 * **`mkdocs-server`** - Robust MkDocs development server with auto-setup
 * **`mkdocs-update-asset`** - Update JavaScript/CSS assets (Mermaid, MathJax, etc.)
-
-### Portable Documentation
-
-* **`mkdocs-portable`** - Create portable, self-contained documentation sites with Electron
-* **`mkdocs-portable-test`** - Test and validate portable MkDocs desktop applications
 * **`mkdocs-test`** - Test and validate portable documentation sites
 
 ## Getting Started

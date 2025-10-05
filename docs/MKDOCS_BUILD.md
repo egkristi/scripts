@@ -1,18 +1,19 @@
-# mkdocs-build
+# mkdocs-build v2.0
 
-Build MkDocs documentation from a primary source directory with ephemeral build folder support.
+Multi-target build system for MkDocs documentation with unified configuration.
 
 ## Overview
 
-`mkdocs-build` creates an ephemeral MkDocs build directory by syncing content from a primary documentation source. The build directory can be safely deleted and regenerated at any time, making it perfect for projects where documentation lives in multiple locations or needs preprocessing.
+`mkdocs-build` is a unified build system that supports multiple output targets from a single configuration file. Build ephemeral MkDocs directories, static websites, and Electron desktop applications all from one command.
 
 ## Key Features
 
-- ✅ **Ephemeral build directory** - Rebuilds from scratch on each run
-- ✅ **Auto-detection** - Automatically detects content directories if not specified
-- ✅ **Asset management** - Copies static assets (CSS, JS, fonts, etc.)
-- ✅ **Flexible configuration** - Configure via CLI or JSON config file
-- ✅ **MkDocs integration** - Automatically runs `mkdocs build` after sync
+- ✅ **Multi-target builds** - mkdocs, site, electron from one config
+- ✅ **Unified configuration** - Single JSON file replaces mkdocs.yml, version.json, build config
+- ✅ **Version management** - Built-in version tracking with auto-increment
+- ✅ **Dynamic mkdocs.yml** - Generated from unified config
+- ✅ **Electron apps** - Desktop application generation with cross-platform support
+- ✅ **Static sites** - Direct static website output
 
 ## Installation
 
@@ -28,61 +29,86 @@ uv run scripts/sbin/mkdocs-build --help
 ### Basic Usage
 
 ```bash
-# Use with config file (recommended)
-uv run scripts/sbin/mkdocs-build --config mkdocs-build.json
+# Build default target (mkdocs)
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json
 
-# Use with command-line arguments
-uv run scripts/sbin/mkdocs-build \
-  --source-dir docs \
-  --build-dir mkdocs \
-  --docs-subdir docs
+# Build specific target
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target site
 
-# Clean only (remove build directory)
-uv run scripts/sbin/mkdocs-build --clean-only
+# Build multiple targets
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target mkdocs,site
 
-# Sync files without running mkdocs build
-uv run scripts/sbin/mkdocs-build --no-build
+# Build all enabled targets
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target all
 
-# Silent mode
-uv run scripts/sbin/mkdocs-build --config mkdocs-build.json --silent
+# Build electron with auto-build
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target electron --electron-build
+
+# List available targets
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --list-targets
 ```
 
-### Configuration File
+### Unified Configuration File
 
-Create a `mkdocs-build.json` file in your project root:
+Create a `docs/mkdocs-build.json` file (stored with your documentation source):
 
 ```json
 {
-  "source_dir": "docs",
-  "build_dir": "mkdocs",
-  "docs_subdir": "docs",
-  "mkdocs_config": "mkdocs.yml",
-  "root_files": ["README.md", "LICENSE.md"],
-  "content_dirs": ["ARCHITECTURE", "BUSINESS", "DEVELOPMENT", "OKR", "LEGAL"],
-  "assets_dir": ".mkdocs-assets",
-  "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+  "version": {
+    "current": "1.0.0",
+    "build_count": 0,
+    "auto_increment": "patch"
+  },
+  "project": {
+    "name": "My Documentation",
+    "description": "Project Documentation",
+    "author": "Author Name",
+    "url": null
+  },
+  "source": {
+    "docs_dir": ".",
+    "content_dirs": ["ARCHITECTURE", "BUSINESS", "DEVELOPMENT"],
+    "assets_dir": ".mkdocs-assets",
+    "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+  },
+  "mkdocs": {
+    "theme": "material",
+    "features": ["navigation.tabs", "search.highlight"],
+    "plugins": ["search", "offline"],
+    "extensions": ["admonition", "pymdownx.superfences"]
+  },
+  "targets": {
+    "mkdocs": {
+      "enabled": true,
+      "output_dir": "../mkdocs",
+      "docs_subdir": "docs",
+      "auto_build": true
+    },
+    "site": {
+      "enabled": true,
+      "output_dir": "../site",
+      "clean_build": true
+    },
+    "electron": {
+      "enabled": true,
+      "output_dir": "../desktop-app/my-docs",
+      "platforms": ["mac", "win", "linux"],
+      "auto_build": false
+    }
+  }
 }
 ```
 
-## Configuration Options
-
-### Required Options
-
-| Option | Description |
-|--------|-------------|
-| `--source-dir` | Primary documentation source directory |
-| `--build-dir` | Ephemeral build directory (will be recreated) |
-
-### Optional Options
+## Command-Line Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--docs-subdir` | Subdirectory within build-dir for docs | `docs` |
-| `--mkdocs-config` | Path to mkdocs.yml file | `mkdocs.yml` |
-| `--config` | Path to JSON configuration file | - |
-| `--clean-only` | Only clean the build directory | `false` |
-| `--no-build` | Sync files but don't run mkdocs build | `false` |
-| `--silent` | Suppress output messages | `false` |
+| `--config` | Path to unified config file | **Required** |
+| `--target` | Target(s) to build (mkdocs, site, electron, all) | `mkdocs` |
+| `--electron-build` | Build Electron apps (override config) | `false` |
+| `--electron-platforms` | Platforms to build (mac,win,linux,all) | From config |
+| `--list-targets` | List available targets and exit | - |
+| `--version` | Show version and exit | - |
 
 ## How It Works
 
