@@ -86,6 +86,7 @@ class BuildTarget(Enum):
     """Available build targets."""
     MKDOCS = "mkdocs"
     SITE = "site"
+    SITE_ZIP = "site-zip"
     ELECTRON = "electron"
     GO = "go"
     ALL = "all"
@@ -187,6 +188,12 @@ class GoTargetConfig(TargetConfig):
     """Go binary target configuration."""
     platforms: List[str] = field(default_factory=lambda: ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"])
     auto_build: bool = True
+
+
+@dataclass
+class SiteZipTargetConfig(TargetConfig):
+    """Site zip archive target configuration."""
+    pass
 
 
 @dataclass
@@ -305,6 +312,13 @@ def load_unified_config(config_path: Path) -> UnifiedConfig:
             output_dir=go_target.get('output_dir', '../go-dists'),
             platforms=go_target.get('platforms', ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"]),
             auto_build=go_target.get('auto_build', True)
+        )
+    
+    if 'site-zip' in targets_data:
+        site_zip_target = targets_data['site-zip']
+        targets['site-zip'] = SiteZipTargetConfig(
+            enabled=site_zip_target.get('enabled', True),
+            output_dir=site_zip_target.get('output_dir', '../site-archives')
         )
     
     return UnifiedConfig(
@@ -985,6 +999,61 @@ go 1.21
     return True
 
 
+def build_site_zip_target(config: UnifiedConfig, target_config: SiteZipTargetConfig) -> bool:
+    """Build site zip archive target."""
+    config.log(f"\n=== Building Site Zip Archive ===", "📦")
+    
+    # First ensure the site is built
+    site_dir = config.config_dir / "../site"
+    if not site_dir.exists():
+        config.log("Site directory not found, building site first...", "")
+        # Build site target first
+        if 'site' in config.targets:
+            site_config = config.targets['site']
+            if isinstance(site_config, SiteTargetConfig):
+                if not build_site_target(config, site_config):
+                    return False
+        else:
+            print(f"❌ Site target not configured", file=sys.stderr)
+            return False
+    
+    # Resolve output directory
+    output_dir = config.config_dir / target_config.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create zip filename
+    zip_filename = f"{config.project.name.replace(' ', '_')}-{config.version.current}-site.zip"
+    zip_path = output_dir / zip_filename
+    
+    # Remove existing zip if it exists
+    if zip_path.exists():
+        zip_path.unlink()
+    
+    config.log(f"Creating zip archive: {zip_filename}", "")
+    
+    try:
+        # Create zip archive
+        import zipfile
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Walk through site directory and add all files
+            for root, dirs, files in os.walk(site_dir):
+                for file in files:
+                    file_path = Path(root) / file
+                    arcname = file_path.relative_to(site_dir)
+                    zipf.write(file_path, arcname)
+        
+        # Get file size
+        size_mb = zip_path.stat().st_size / (1024 * 1024)
+        config.log(f"Created {zip_filename} ({size_mb:.1f}MB)", "✅")
+        
+    except Exception as e:
+        print(f"❌ Zip creation failed: {e}", file=sys.stderr)
+        return False
+    
+    config.log(f"Site archive ready: {output_dir.relative_to(config.config_dir.parent)}/", "✅")
+    return True
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -1107,6 +1176,11 @@ def main() -> int:
                 platforms = args.go_platforms.split(',') if args.go_platforms else None
                 
                 if not build_go_target(config, target_config, platforms):
+                    success = False
+                    break
+            
+            elif target_name == 'site-zip' and isinstance(target_config, SiteZipTargetConfig):
+                if not build_site_zip_target(config, target_config):
                     success = False
                     break
         
