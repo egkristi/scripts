@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.8"
-# dependencies = []
+# dependencies = [
+#     "mkdocs>=1.5.0",
+#     "mkdocs-material>=9.4.0",
+# ]
 # ///
 """
 MkDocs Build v2.0 - Multi-Target Build System
@@ -514,7 +517,7 @@ def build_mkdocs_target(config: UnifiedConfig, target_config: MkDocsTargetConfig
     index_src = config.source_dir / "index.md"
     if index_src.exists():
         shutil.copy2(index_src, docs_dir / "index.md")
-        config.log(f"Synced index.md", "📄")
+        config.log(f"Synced index.md", "")
     
     # Auto-detect content dirs if not specified
     content_dirs = config.source.content_dirs
@@ -549,7 +552,7 @@ def build_mkdocs_target(config: UnifiedConfig, target_config: MkDocsTargetConfig
     
     # Run mkdocs build if enabled
     if target_config.auto_build:
-        config.log("Building MkDocs site...", "🏗️")
+        config.log("Building MkDocs site...", "")
         try:
             cmd = ["mkdocs", "build", "--clean", "--config-file", str(mkdocs_yml_path)]
             subprocess.run(cmd, check=True, cwd=output_dir.parent)
@@ -611,7 +614,7 @@ def build_site_target(config: UnifiedConfig, target_config: SiteTargetConfig) ->
         generate_mkdocs_yml(config, mkdocs_yml)
         
         # Build site
-        config.log("Building static site...", "🏗️")
+        config.log("Building static site...", "")
         cmd = ["mkdocs", "build", "--clean", "--site-dir", str(output_dir.resolve()), "--config-file", str(mkdocs_yml.resolve())]
         subprocess.run(cmd, check=True, cwd=str(temp_build_dir.resolve()))
         
@@ -967,9 +970,9 @@ def main() -> int:
     config.version.build_count += 1
     save_version(config)
     
-    config.log(f"MkDocs Build v{VERSION}", "🚀")
+    config.log(f"MkDocs Build v{VERSION}", "")
     config.log(f"Version: {config.version.current} (build #{config.version.build_count})", "📋")
-    config.log(f"Targets: {', '.join(sorted(requested_targets))}", "🎯")
+    config.log(f"Targets: {', '.join(sorted(requested_targets))}", "")
     
     # Build targets
     success = True
@@ -1004,7 +1007,7 @@ def main() -> int:
             break
     
     if success:
-        config.log(f"\n✨ Build complete!", "🎉")
+        config.log(f"\nBuild complete!", "🎉")
         return 0
     else:
         print(f"\n❌ Build failed", file=sys.stderr)

@@ -123,7 +123,7 @@ scripts/sbin/mkdocs-update-asset \
 # Output:
 # 🔍 Checking for latest mermaid release...
 # 📦 Latest mermaid version: v11.4.0
-# 📈 Updating from v11.3.0 to v11.4.0
+# Updating from v11.3.0 to v11.4.0
 # ⬇️  Downloading from: https://unpkg.com/mermaid@11.4.0/dist/mermaid.min.js
 # ✅ Successfully downloaded mermaid v11.4.0
 # 📁 File size: 2.1M
@@ -215,7 +215,7 @@ echo "All assets updated!"
 
 🔍 Checking for latest mermaid release...
 📦 Latest mermaid version: v11.4.0
-📈 Updating from v11.3.0 to v11.4.0
+Updating from v11.3.0 to v11.4.0
 ⬇️  Downloading from: https://unpkg.com/mermaid@11.4.0/dist/mermaid.min.js
 ✅ Successfully downloaded mermaid v11.4.0
 📁 File size: 2.1M

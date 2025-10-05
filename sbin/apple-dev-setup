@@ -761,7 +761,7 @@ class AppleDeveloperSetup:
             "• Test with: mkdocs-portable --source-folder docs --with-electron --build-electron\n"
             "• Your apps will be automatically signed with your certificate\n"
             "• Users can install and run your apps without security warnings",
-            title="🚀 Ready to Build!"
+            title="Ready to Build!"
         ))
         
     def cleanup_temp_files(self):

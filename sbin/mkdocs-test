@@ -78,7 +78,7 @@ def check_docs_content(target_dir: Path, verbose: bool = False) -> bool:
     
     # Count markdown files
     md_files = list(docs_dir.glob("**/*.md"))
-    print(f"\n📄 Documentation files: {len(md_files)} total")
+    print(f"\nDocumentation files: {len(md_files)} total")
     
     if verbose:
         for md_file in sorted(md_files):
@@ -381,7 +381,7 @@ def main():
         print("3. Open browser to http://localhost:8000")
         
         if electron_ok:
-            print("\n📱 Desktop applications are also available!")
+            print("\nDesktop applications are also available!")
             print("   Check the 'dist' folder for built applications.")
         
         return True

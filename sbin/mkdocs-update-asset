@@ -136,7 +136,7 @@ if [ -f "$VERSION_FILE" ] && [ "$FORCE_UPDATE" = false ]; then
         echo -e "${GREEN}✅ Already using latest version (v${LATEST_VERSION})${NC}"
         exit 0
     fi
-    echo -e "${YELLOW}📈 Updating from v${CURRENT_VERSION} to v${LATEST_VERSION}${NC}"
+    echo -e "${YELLOW}Updating from v${CURRENT_VERSION} to v${LATEST_VERSION}${NC}"
 else
     if [ "$FORCE_UPDATE" = true ]; then
         echo -e "${YELLOW}🔄 Force updating to v${LATEST_VERSION}${NC}"
