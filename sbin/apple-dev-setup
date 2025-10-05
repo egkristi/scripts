@@ -162,7 +162,7 @@ class AppleDeveloperSetup:
             f"Timestamp: [dim]{timestamp}[/dim]\n\n"
             f"Completed steps:\n" + 
             "\n".join([f"✅ {step.replace('_', ' ').title()}" for step in completed_steps]),
-            title="📋 Progress Status"
+            title="Progress Status"
         ))
         
     def display_current_config(self, config: Dict):
@@ -218,7 +218,7 @@ class AppleDeveloperSetup:
                 f"[yellow]Where to find Team ID:[/yellow]\n"
                 f"Apple Developer Portal → Account → Membership Details\n"
                 f"[link=https://developer.apple.com/account#MembershipDetailsCard]https://developer.apple.com/account#MembershipDetailsCard[/link]",
-                title="📋 Required Information"
+                title="Required Information"
             ))
         
         # Offer to open helpful websites
@@ -357,7 +357,7 @@ class AppleDeveloperSetup:
             f"6. Double-click [cyan]developer_id_application.cer[/cyan] to install in Keychain Access\n\n"
             f"[red]⚠️  Important:[/red] Choose [bold]Developer ID Application[/bold], not iOS Distribution!\n"
             f"[yellow]The browser will open automatically...[/yellow]",
-            title="📋 Certificate Creation Steps"
+            title="Certificate Creation Steps"
         ))
         
         if Confirm.ask("Open Apple Developer Portal now?", default=False):
@@ -831,7 +831,7 @@ class AppleDeveloperSetup:
             if force_enable:
                 console.print("⚠️  Could not find installed certificate, but force-enable is active")
                 identity = f"Developer ID Application: {user_info['developerName']} ({user_info['teamId']})"
-                console.print(f"🔧 Using constructed identity: {identity}")
+                console.print(f"Using constructed identity: {identity}")
             else:
                 console.print("❌ Could not find installed certificate")
                 console.print("Please ensure you have downloaded and installed the certificate from Apple Developer portal")
@@ -852,7 +852,7 @@ class AppleDeveloperSetup:
         if not self.verify_certificate(identity):
             if force_enable:
                 console.print("⚠️  Certificate verification failed, but force-enable is active")
-                console.print("🔧 Proceeding with configuration anyway...")
+                console.print("Proceeding with configuration anyway...")
             else:
                 console.print("❌ Certificate verification failed")
                 console.print(Panel(
@@ -871,7 +871,7 @@ class AppleDeveloperSetup:
                     f"3. Re-run this script\n\n"
                     f"[red]Important:[/red] The certificate must be created with the CSR from this script!\n"
                     f"[blue]Only then will mkdocs-portable have working code signing by default.[/blue]",
-                    title="🔧 Fix Certificate Issue"
+                    title="Fix Certificate Issue"
                 ))
                 
                 # Offer to open Keychain Access for easier certificate management

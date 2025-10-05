@@ -84,7 +84,7 @@ def check_docs_content(target_dir: Path, verbose: bool = False) -> bool:
         for md_file in sorted(md_files):
             rel_path = md_file.relative_to(docs_dir)
             size = md_file.stat().st_size
-            print(f"  📝 {rel_path} ({size} bytes)")
+            print(f"  {rel_path} ({size} bytes)")
     
     # Check for common documentation patterns
     common_files = ["index.md", "README.md"]

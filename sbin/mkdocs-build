@@ -479,7 +479,7 @@ nav:
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(yml_content)
     
-    config.log(f"Generated mkdocs.yml", "📝")
+    config.log(f"Generated mkdocs.yml", "")
 
 
 def auto_detect_content_dirs(source_dir: Path) -> List[str]:
@@ -921,7 +921,7 @@ def main() -> int:
     save_version(config)
     
     config.log(f"MkDocs Build v{VERSION}", "")
-    config.log(f"Version: {config.version.current} (build #{config.version.build_count})", "📋")
+    config.log(f"Version: {config.version.current} (build #{config.version.build_count})", "")
     config.log(f"Targets: {', '.join(sorted(requested_targets))}", "")
     
     # Build targets
