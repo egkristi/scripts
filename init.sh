@@ -1,8 +1,8 @@
 #!/bin/bash
 # init.sh - Script to initialize the sbin directory in PATH
 
-REPO_URL="https://github.com/egkristi/shell-scripts.git"
-REPO_NAME="shell-scripts"
+REPO_URL="https://github.com/egkristi/scripts.git"
+REPO_NAME="scripts"
 
 # Ensure the sbin directory exists
 sbin_exists(){
@@ -42,8 +42,8 @@ add_to_profile() {
     if [ -f "$profile_file" ]; then
         if grep -q "# Added by ${REPO_NAME} init.sh script on" "$profile_file"; then
             #echo "Sed find line that starts with source and ends with shell-scripts/init.sh"          
-            sed -i -e 's|^# Added by '"${REPO_NAME}"' init.sh script on.*|# Added by '"${REPO_NAME}"' init.sh script on '"$(date)"'"|g' $profile_file
-            sed -i -e 's|^source.*shell-scripts/init\.sh"|source "'"${SCRIPT_DIR}/init.sh"'"|g' $profile_file
+            sed -i '' -e 's|^# Added by '"${REPO_NAME}"' init.sh script on.*|# Added by '"${REPO_NAME}"' init.sh script on '"$(date)"'"|g' "$profile_file"
+            sed -i '' -e 's|^source.*scripts/init\.sh"|source "'"${SCRIPT_DIR}/init.sh"'"|g' "$profile_file"
             #rm -f "$profile_file.bak"
         else
             echo -e "\n# Added by ${REPO_NAME} init.sh script on $(date)" >> "$profile_file"

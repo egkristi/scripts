@@ -1,4 +1,9 @@
 .DS_Store
+__pycache__/
+*.pyc
+.venv/
+site/
+.cache/
 
 # Apple Developer Configuration (contains sensitive information)
 .apple-developer-config.json

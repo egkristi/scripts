@@ -50,7 +50,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 
 def ensure_mkdocs_installed(install: bool, silent: bool) -> bool:
@@ -111,7 +111,7 @@ def serve(project_root: Path, host: str, port: int, silent: bool) -> int:
         return 0
 
 
-def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Serve a MkDocs site with automatic setup and inline dependencies",
         epilog="Examples:\n"
@@ -135,7 +135,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     project_root = Path(args.project_root).resolve()
     project_root.mkdir(parents=True, exist_ok=True)

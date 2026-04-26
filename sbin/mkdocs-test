@@ -208,21 +208,15 @@ def test_mkdocs_config(target_dir: Path, verbose: bool = False) -> bool:
         return False
     
     try:
-        # Change to target directory for relative path resolution
-        original_cwd = Path.cwd()
-        import os
-        os.chdir(target_dir)
-        
         # Try to validate the config
         result = subprocess.run(
             [sys.executable, "-c", 
              "import mkdocs.config; config = mkdocs.config.load_config('mkdocs.yml'); print('Config loaded successfully')"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            cwd=str(target_dir)
         )
-        
-        os.chdir(original_cwd)
         
         if result.returncode == 0:
             print("  ✅ MkDocs configuration is valid")
@@ -272,18 +266,13 @@ def test_uv_config(target_dir: Path, verbose: bool = False) -> bool:
         if verbose:
             # Try to validate with uv (if available)
             try:
-                original_cwd = Path.cwd()
-                import os
-                os.chdir(target_dir)
-                
                 result = subprocess.run(
                     ["uv", "tree", "--quiet"],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
+                    cwd=str(target_dir)
                 )
-                
-                os.chdir(original_cwd)
                 
                 if result.returncode == 0:
                     print("     uv can read the configuration")
