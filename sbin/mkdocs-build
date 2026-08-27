@@ -1930,8 +1930,8 @@ def main() -> int:
                     break
             
             elif target_name == 'electron' and isinstance(target_config, ElectronTargetConfig):
-                # Default to auto-build for electron target (always build unless explicitly disabled)
-                auto_build = True  # Always build electron apps by default
+                # --electron-build forces a build; otherwise respect the target's own auto_build setting
+                auto_build = args.electron_build or target_config.auto_build
                 platforms = args.electron_platforms.split(',') if args.electron_platforms else None
                 
                 if not build_electron_target(config, target_config, auto_build, platforms):

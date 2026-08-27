@@ -6,9 +6,10 @@
 """
 Test Portable MkDocs Site
 
-This script validates that a portable MkDocs site created by mkdocs-portable
-is properly configured and ready to use. It checks for required files,
-validates the MkDocs configuration, and provides helpful feedback.
+This script validates that a portable MkDocs site created by
+`convert-to-mkdocs --with-portable` is properly configured and ready to use.
+It checks for required files, validates the MkDocs configuration, and
+provides helpful feedback.
 
 Features:
 - Validates portable site structure
@@ -325,7 +326,7 @@ def main():
     # Check if directory exists
     if not target_dir.exists():
         print("❌ Error: Target directory not found!")
-        print("Create a portable site first using mkdocs-portable.")
+        print("Create a portable site first using: convert-to-mkdocs --with-portable")
         return False
     
     # Run tests

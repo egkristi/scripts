@@ -1,10 +1,10 @@
 # Apple Developer Code Signing Setup
 
-This guide explains how to configure Apple Developer code signing for the mkdocs-portable script to create properly signed macOS applications.
+This guide explains how to configure Apple Developer code signing for the `mkdocs-build` script's `electron` target to create properly signed macOS applications.
 
 ## Overview
 
-The mkdocs-portable script supports automatic code signing through a configuration file system that:
+The `mkdocs-build` electron target supports automatic code signing through a configuration file system that:
 - Keeps sensitive Apple Developer credentials separate from code
 - Is automatically gitignored for security
 - Provides fallback to unsigned builds when not configured
@@ -48,9 +48,9 @@ The mkdocs-portable script supports automatic code signing through a configurati
 
 ### 3. Build Signed Applications
 
-Once configured, run mkdocs-portable as normal:
+Once configured, run `mkdocs-build` with the `electron` target as normal:
 ```bash
-mkdocs-portable --source-folder docs --target-folder output --with-electron --build-electron --site-name "My App"
+mkdocs-build --config docs/mkdocs-build.json --target electron --electron-build
 ```
 
 The script will automatically:
@@ -159,4 +159,4 @@ Planned features for the configuration system:
 
 ---
 
-For questions or issues, refer to the main mkdocs-portable documentation or create an issue in the repository.
+For questions or issues, refer to the main [mkdocs-build documentation](MKDOCS_BUILD.md) or create an issue in the repository.

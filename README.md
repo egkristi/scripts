@@ -6,45 +6,51 @@ Generic, reusable scripts for documentation and development workflows.
 
 ### `mkdocs-build`
 
-Build MkDocs documentation from a primary source directory with ephemeral build folder support.
+Multi-target MkDocs build system (v2.0) driven by a single unified JSON config.
 
-**Purpose**: Creates an ephemeral MkDocs build directory by syncing content from a primary documentation source. The build directory can be safely deleted and regenerated at any time.
+**Purpose**: Builds one or more output targets (ephemeral `mkdocs` dir, static `site`, `site-zip` archive, `combined-html`, `pdf`, `electron` desktop app, `go` static-binary server) from one config file. See [docs/MKDOCS_BUILD.md](docs/MKDOCS_BUILD.md) for full details.
 
 **Usage**:
 ```bash
-# Use with config file
-uv run scripts/sbin/mkdocs-build --config mkdocs-build.json
+# Build the default target (mkdocs)
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json
 
-# Use with command-line arguments
-uv run scripts/sbin/mkdocs-build --source-dir docs --build-dir mkdocs
+# Build a specific target
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target site
 
-# Clean only (remove build directory)
-uv run scripts/sbin/mkdocs-build --clean-only
+# Build multiple / all enabled targets
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target mkdocs,site
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target all
 
-# Sync files without running mkdocs build
-uv run scripts/sbin/mkdocs-build --no-build
+# List configured targets
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --list-targets
 ```
 
-**Config File Example** (`mkdocs-build.json`):
+**Config File Example** (`docs/mkdocs-build.json`):
 ```json
 {
-  "source_dir": "docs",
-  "build_dir": "mkdocs",
-  "docs_subdir": "docs",
-  "mkdocs_config": "mkdocs.yml",
-  "root_files": ["README.md", "LICENSE.md"],
-  "content_dirs": ["ARCHITECTURE", "BUSINESS", "DEVELOPMENT"],
-  "assets_dir": ".mkdocs-assets",
-  "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+  "version": { "current": "1.0.0", "auto_increment": "patch" },
+  "project": { "name": "My Docs", "description": "Documentation", "author": "Author Name" },
+  "source": {
+    "docs_dir": ".",
+    "content_dirs": ["ARCHITECTURE", "BUSINESS"],
+    "assets_dir": ".mkdocs-assets",
+    "asset_subdirs": ["assets", "javascripts", "stylesheets"]
+  },
+  "targets": {
+    "mkdocs": { "enabled": true, "output_dir": "../mkdocs" },
+    "site": { "enabled": true, "output_dir": "../site" },
+    "electron": { "enabled": false, "output_dir": "../desktop-app" }
+  }
 }
 ```
 
 **Features**:
-- Rebuilds build directory from scratch on each run
+- Multiple output targets from one config: `mkdocs`, `site`, `site-zip`, `combined-html`, `pdf`, `electron`, `go`
 - Auto-detects content directories if not specified
 - Copies static assets (CSS, JS, fonts, etc.)
-- Runs `mkdocs build` automatically
-- Configurable via CLI or JSON config file
+- Built-in version tracking with auto-increment on every build
+- Dynamically generates `mkdocs.yml` from the unified config
 
 ---
 

@@ -95,10 +95,10 @@ exclude_pattern=$(extensions_to_pattern "$exclude_extensions")
 # First pass: collect all matching files
 if [ "$exclude_hidden" = true ]; then
     # Exclude hidden files and directories
-    find_command="find \"$target_dir\" -type f -not -path \"*/\\.*\" | sort"
+    find_args=("$target_dir" -type f -not -path "*/.*")
 else
     # Include all files
-    find_command="find \"$target_dir\" -type f | sort"
+    find_args=("$target_dir" -type f)
 fi
 
 while read -r file; do
@@ -142,7 +142,7 @@ while read -r file; do
     else
         log_skip "$file" "non-text file"
     fi
-done < <(eval "$find_command")
+done < <(find "${find_args[@]}" | sort)
 
 # Generate structured TOC
 toc="<!-- BEGIN_FILE_INVENTORY -->\n"

@@ -3,7 +3,7 @@
 Apple Developer Certificate Setup Tool
 
 This script automates the process of setting up Apple Developer certificates
-for code signing macOS applications built with mkdocs-portable.
+for code signing macOS Electron applications built with mkdocs-build's electron target.
 
 Features:
 - Interactive prompts for required information
@@ -66,7 +66,7 @@ class AppleDeveloperSetup:
             "• Generate a Certificate Signing Request (CSR)\n"
             "• Create a Developer ID Application certificate\n"
             "• Install the certificate in Keychain\n"
-            "• Configure mkdocs-portable for code signing\n\n"
+            "• Configure mkdocs-build's electron target for code signing\n\n"
             "[yellow]Prerequisites:[/yellow]\n"
             "• Apple Developer Account ($99/year)\n"
             "• macOS with Keychain Access\n"
@@ -641,7 +641,7 @@ class AppleDeveloperSetup:
                 f"3. Upload our CSR: [cyan]{self.csr_file}[/cyan]\n"
                 f"4. Download and install the new certificate\n"
                 f"5. Re-run this script to verify\n\n"
-                f"[blue]The new certificate will work with mkdocs-portable code signing![/blue]",
+                f"[blue]The new certificate will work with mkdocs-build's electron code signing![/blue]",
                 title="🔄 Certificate Reset Complete"
             ))
             
@@ -669,7 +669,7 @@ class AppleDeveloperSetup:
             if identity in result.stdout:
                 console.print("✅ Certificate is valid for code signing")
                 console.print("✅ Private key is properly associated")
-                console.print("✅ Ready for mkdocs-portable code signing")
+                console.print("✅ Ready for mkdocs-build electron code signing")
                 return True
             else:
                 console.print("❌ Certificate not found in code signing identities")
@@ -755,10 +755,10 @@ class AppleDeveloperSetup:
         
         console.print(Panel(
             "[bold green]Your Apple Developer certificate is now configured![/bold green]\n\n"
-            "You can now use mkdocs-portable with the --build-electron flag\n"
+            "You can now use mkdocs-build's electron target\n"
             "to create properly signed macOS applications.\n\n"
             "[yellow]Next steps:[/yellow]\n"
-            "• Test with: mkdocs-portable --source-folder docs --with-electron --build-electron\n"
+            "• Test with: mkdocs-build --config docs/mkdocs-build.json --target electron --electron-build\n"
             "• Your apps will be automatically signed with your certificate\n"
             "• Users can install and run your apps without security warnings",
             title="Ready to Build!"
@@ -870,7 +870,7 @@ class AppleDeveloperSetup:
                     f"   • Download and install new certificate\n"
                     f"3. Re-run this script\n\n"
                     f"[red]Important:[/red] The certificate must be created with the CSR from this script!\n"
-                    f"[blue]Only then will mkdocs-portable have working code signing by default.[/blue]",
+                    f"[blue]Only then will mkdocs-build's electron target have working code signing by default.[/blue]",
                     title="Fix Certificate Issue"
                 ))
                 
@@ -900,7 +900,7 @@ def main(force, force_enable):
     """Apple Developer Certificate Setup Tool
     
     Automates the complete process of setting up Apple Developer certificates
-    for code signing macOS applications built with mkdocs-portable.
+    for code signing macOS Electron applications built with mkdocs-build's electron target.
     """
     try:
         setup = AppleDeveloperSetup()

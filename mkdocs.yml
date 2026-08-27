@@ -1,1 +1,3 @@
 site_name: Shell-Scripts Docs
+theme:
+  name: material

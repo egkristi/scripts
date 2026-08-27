@@ -298,7 +298,7 @@ esac
 
 - **`mkdocs-build`** - Build MkDocs documentation
 - **`mkdocs-server`** - Serve MkDocs documentation
-- **`mkdocs-portable`** - Create portable documentation sites
+- **`convert-to-mkdocs`** - Convert a website mirror into an MkDocs project (supports `--with-portable` for a relocatable site)
 
 ## See Also
 

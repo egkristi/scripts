@@ -180,12 +180,17 @@ If system dependencies are too complex, use these alternatives:
 
 ## How It Works
 
-1. **Clean**: Removes existing build directory
-2. **Create**: Creates fresh build directory structure
-3. **Copy Root Files**: Copies specified root files (README, LICENSE, etc.)
-4. **Sync Content**: Copies content directories to build location
-5. **Copy Assets**: Copies static assets (CSS, JS, etc.)
-6. **Build**: Runs `mkdocs build` (unless `--no-build` specified)
+Each target passed to `--target` runs its own build function:
+
+1. **mkdocs**: cleans `output_dir`, syncs `index.md` + content dirs + assets, generates `mkdocs.yml`, then runs `mkdocs build` (if `auto_build`)
+2. **site**: stages content in a temp dir and runs `mkdocs build --site-dir <output_dir>`
+3. **site-zip**: builds `site` first if missing, then zips it
+4. **combined-html**: builds `site` first if missing, then flattens all pages into one HTML file with a generated TOC
+5. **pdf**: builds `combined-html` first, then renders it to PDF via Playwright/Chromium
+6. **electron**: builds a static site, generates `main.js`/`package.json`, and (unless disabled) runs `npm install` + `electron-builder`
+7. **go**: builds a static site, embeds it in `templates/static_web_server.go`, and cross-compiles a binary per platform
+
+Every run also increments `version.current` (per `auto_increment`) and persists it back to the config file, regardless of which targets are selected.
 
 ## Use Cases
 
@@ -235,23 +240,23 @@ Integrate into your CI/CD workflow:
 
 ```bash
 # Initial setup
-cat > mkdocs-build.json << EOF
+mkdir -p docs
+cat > docs/mkdocs-build.json << EOF
 {
-  "source_dir": "docs",
-  "build_dir": "mkdocs",
-  "docs_subdir": "docs",
-  "content_dirs": ["ARCHITECTURE", "BUSINESS"]
+  "version": { "current": "1.0.0", "auto_increment": "patch" },
+  "project": { "name": "My Docs" },
+  "source": { "docs_dir": ".", "content_dirs": ["ARCHITECTURE", "BUSINESS"] },
+  "targets": {
+    "mkdocs": { "enabled": true, "output_dir": "../mkdocs" }
+  }
 }
 EOF
 
 # Build documentation
-uv run scripts/sbin/mkdocs-build --config mkdocs-build.json
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json
 
 # Serve locally
-uv run mkdocs serve
-
-# Clean build directory
-uv run scripts/sbin/mkdocs-build --clean-only
+cd mkdocs && uv run mkdocs serve
 ```
 
 ## Best Practices
@@ -265,11 +270,12 @@ uv run scripts/sbin/mkdocs-build --clean-only
 
 ### Build directory not cleaned
 
-**Problem**: Old files remain in build directory
+**Problem**: Stale files remain in an output directory
 
-**Solution**: Use `--clean-only` to manually clean:
+**Solution**: The `mkdocs` target always removes its `output_dir` before rebuilding, and `site` does so by default (`clean_build: true`). If files still linger, delete the output directory manually and rebuild:
 ```bash
-uv run scripts/sbin/mkdocs-build --clean-only
+rm -rf mkdocs   # or whichever output_dir you configured
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json
 ```
 
 ### Assets not copying
@@ -288,9 +294,9 @@ uv run scripts/sbin/mkdocs-build --clean-only
 
 **Problem**: MkDocs build errors after sync
 
-**Solution**: Use `--no-build` to sync only, then debug:
+**Solution**: Build just the `mkdocs` target, then debug directly with MkDocs:
 ```bash
-uv run scripts/sbin/mkdocs-build --no-build
+uv run scripts/sbin/mkdocs-build --config docs/mkdocs-build.json --target mkdocs
 cd mkdocs
 uv run mkdocs build --verbose
 ```
@@ -298,8 +304,8 @@ uv run mkdocs build --verbose
 ## Related Tools
 
 - **`mkdocs-server`** - Serve MkDocs documentation
-- **`mkdocs-portable`** - Create portable documentation sites
-- **`mkdocs-portable-test`** - Test portable documentation
+- **`convert-to-mkdocs`** - Convert a website mirror into an MkDocs project (supports `--with-portable` for a relocatable site)
+- **`mkdocs-test`** - Validate a portable documentation site before distribution
 
 ## See Also
 
